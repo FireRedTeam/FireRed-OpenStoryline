@@ -90,7 +90,7 @@
 > 🎨 <b>效果说明：</b>受限于开源素材的版权协议，第一行默认演示中的元素（字体/音乐）仅为基础效果。<b>强烈建议</b>接入<a href="https://github.com/FireRedTeam/FireRed-OpenStoryline/blob/main/docs/source/zh/guide.md#2-%E9%AB%98%E7%BA%A7%E4%BD%BF%E7%94%A8%E6%95%99%E7%A8%8B">自建元素库教程</a>，解锁商用级字体、音乐、特效等，可实现显著优于默认效果的视频质量。<br>
 > ⚠️ <b>画质注：</b>受限于README展示空间，演示视频经过极限压缩。实际运行默认保持原分辨率输出，支持自定义尺寸。<br>
 > Demo中：<b>第一行</b>为默认开源素材效果（受限模式），<b>第二行</b>为小红书App「AI剪辑」元素库效果。👉 <a href="https://image-url-2-feature-1251524319.cos.ap-shanghai.myqcloud.com/openstoryline/docs/media/others/ai_cut_guide.png">点击查看体验教程</a><br>
-> ⚖️ <b>免责声明：</b>演示中包含的用户自摄素材及品牌标识仅作技术能力展示，版权归原作者所有，严禁二次分发。如有侵权请联系删除。
+> ⚖️ <b>免责声明：</b>演示中包含的用户自摄素材及品牌标识仅作技术能力展示，版权归原作者所有。如有侵权请联系删除。
 > </sub>
 
 

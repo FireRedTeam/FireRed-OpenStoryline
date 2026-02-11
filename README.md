@@ -86,7 +86,7 @@
 > 🎨 <b>Effects Note:</b> Due to licensing restrictions on open-source assets, the elements (fonts/music) in the first row represent only basic effects. We <b>highly recommend</b> following the <a href="https://github.com/FireRedTeam/FireRed-OpenStoryline/blob/main/docs/source/zh/guide.md#2-%E9%AB%98%E7%BA%A7%E4%BD%BF%E7%94%A8%E6%95%99%E7%A8%8B">Custom Asset Library Tutorial</a> to unlock commercial-grade fonts, music, and VFX for significantly better video quality.<br>
 > ⚠️ <b>Quality Note:</b> To save space in the README, the demo videos are heavily compressed. The actual output retains the original resolution by default and supports custom dimensions.<br>
 > In the Demo: The <b>first row</b> shows default open-source assets (Restricted Mode); the <b>second row</b> shows Xiaohongshu App "AI Clip" asset library effects. 👉 <a href="https://image-url-2-feature-1251524319.cos.ap-shanghai.myqcloud.com/openstoryline/docs/media/others/ai_cut_guide.png">Click to view tutorial</a><br>
-> ⚖️ <b>Disclaimer:</b> User footage and brand logos shown in the demos are for technical demonstration purposes only. Ownership belongs to the original creators; redistribution is strictly prohibited. Please contact us for copyright concerns.
+> ⚖️ <b>Disclaimer:</b> User footage and brand logos shown in the demos are for technical demonstration purposes only. Ownership belongs to the original creators. Please contact us for copyright concerns.
 > </sub>
 
 
