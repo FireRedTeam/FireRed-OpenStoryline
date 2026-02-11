@@ -303,7 +303,7 @@ class GenerateVoiceoverNode(BaseNode):
         """
         - Only keep fields that exist in schema
         - Type coercion
-        - Enum validation (string enum / numeric range / discrete numeric enum)
+        - value validation (string enum / numeric range / discrete numeric enum)
         """
         out: Dict[str, Any] = {}
 
@@ -316,30 +316,46 @@ class GenerateVoiceoverNode(BaseNode):
                 continue
 
             typ = (rule.get("type") or "").lower().strip()
-            enum = rule.get("enum")
-
             normalized = self._normalize_value(val, typ)
             if normalized is None:
                 continue
 
-            # Enum validation
-            if isinstance(enum, list) and enum:
-                if typ in ("int", "float") and len(enum) == 2 and all(isinstance(value, (int, float)) for value in enum):
-                    range_min, range_max = float(enum[0]), float(enum[1])
+            # 1) Continuous: range: [min, max]
+            if "range" in rule:
+                vaule_range = rule.get("range")
+                if (
+                    typ in ("int", "float")
+                    and isinstance(vaule_range, list)
+                    and len(vaule_range) == 2
+                    and all(isinstance(x, (int, float)) for x in vaule_range)
+                ):
+                    range_min, range_max = float(vaule_range[0]), float(vaule_range[1])
                     value = float(normalized)
+
                     if value < range_min:
                         value = range_min
-                    if value > range_max:
+                    elif value > range_max:
                         value = range_max
+
                     normalized = int(value) if typ == "int" else float(round(value, 1))
+
                 else:
+                    continue
+
+            # 2) Discrete: enum: [...]
+            elif "enum" in rule:
+                enum = rule.get("enum")
+                if isinstance(enum, list) and enum:
                     if normalized not in enum:
                         normalized = enum[0]
+                else:
+                    continue
 
+            # 3) No range/enum: keep normalized as-is (type-coerced only)
             out[key] = normalized
 
         return out
-
+    
     def _normalize_value(self, val: Any, typ: str) -> Any:
         if typ in ("str", "string"):
             return str(val)
@@ -348,7 +364,7 @@ class GenerateVoiceoverNode(BaseNode):
             return int(val)
 
         if typ in ("float"):
-            return float(int(val))
+            return float(val)
 
         if typ in ("bool", "boolean"):
             return bool(val)

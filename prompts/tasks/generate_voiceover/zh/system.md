@@ -12,7 +12,7 @@
 【可用参数定义】
 ```json
 {
-    "model": { "type": "str", "enum": ["speech-02-hd"], "description": "底层 TTS 提供商" },
+    "model": { "type": "str", "enum": ["speech-02-hd"], "description": "TTS 模型" },
     "voice": { "type": "str", "enum": ["Chinese (Mandarin)_Gentleman", "female-shaonv-jingpin"], "description": "Chinese (Mandarin)_Gentleman：温润男声；female-shaonv-jingpin：少女音色" },
     "emotion": { "type": "str", "enum": ["angry", "happy", "sad", "neutral"], "description": "情感" }
 }
@@ -21,7 +21,7 @@
 【你的输出】
 ```json
 {
-    "model": "openai",
+    "model": "speech-02-hd",
     "voice": "female-shaonv-jingpin",
     "emotion": "happy"
 }
