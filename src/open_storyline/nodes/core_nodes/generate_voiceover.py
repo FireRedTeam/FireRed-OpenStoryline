@@ -263,11 +263,17 @@ class GenerateVoiceoverNode(BaseNode):
         if not raw:
             return {}
 
-        parsed = parse_json_dict(raw)
+        try:
+            parsed = parse_json_dict(raw)
+        except Exception:
+            return {}
         if not isinstance(parsed, dict):
             return {}
 
-        return self._sanitize_params_by_schema(parsed, provider_param_schema)
+        try:
+            return self._sanitize_params_by_schema(parsed, provider_param_schema)
+        except Exception:
+            return {}
 
     # ---------------------------------------------------------------------
     # validation helpers
@@ -321,26 +327,41 @@ class GenerateVoiceoverNode(BaseNode):
                 continue
 
             # 1) Continuous: range: [min, max]
-            if "range" in rule:
-                vaule_range = rule.get("range")
-                if (
-                    typ in ("int", "float")
-                    and isinstance(vaule_range, list)
-                    and len(vaule_range) == 2
-                    and all(isinstance(x, (int, float)) for x in vaule_range)
-                ):
-                    range_min, range_max = float(vaule_range[0]), float(vaule_range[1])
-                    value = float(normalized)
+            value_range = rule.get("range")
+            if (
+                typ in ("int", "float")
+                and isinstance(value_range, list)
+                and len(value_range) == 2
+                and all(isinstance(x, (int, float)) for x in value_range)
+            ):
+                range_min, range_max = float(value_range[0]), float(value_range[1])
+                value = float(normalized)
 
-                    if value < range_min:
-                        value = range_min
-                    elif value > range_max:
-                        value = range_max
+                if value < range_min:
+                    value = range_min
+                elif value > range_max:
+                    value = range_max
 
-                    normalized = int(value) if typ == "int" else float(round(value, 1))
+                normalized = int(value) if typ == "int" else float(round(value, 1))
 
-                else:
-                    continue
+            # Backward compatibility:
+            # for legacy schema where numeric range was encoded as enum=[min,max]
+            elif (
+                typ in ("int", "float")
+                and "enum" in rule
+                and isinstance(rule.get("enum"), list)
+                and len(rule["enum"]) == 2
+                and all(isinstance(x, (int, float)) for x in rule["enum"])
+            ):
+                range_min, range_max = float(rule["enum"][0]), float(rule["enum"][1])
+                value = float(normalized)
+
+                if value < range_min:
+                    value = range_min
+                elif value > range_max:
+                    value = range_max
+
+                normalized = int(value) if typ == "int" else float(round(value, 1))
 
             # 2) Discrete: enum: [...]
             elif "enum" in rule:
@@ -351,23 +372,62 @@ class GenerateVoiceoverNode(BaseNode):
                 else:
                     continue
 
-            # 3) No range/enum: keep normalized as-is (type-coerced only)
+            # 3) Invalid range definition for numeric fields: drop this field
+            elif "range" in rule and typ in ("int", "float"):
+                continue
+
+            # 4) No range/enum: keep normalized as-is (type-coerced only)
             out[key] = normalized
 
         return out
     
     def _normalize_value(self, val: Any, typ: str) -> Any:
-        if typ in ("str", "string"):
-            return str(val)
+        if val is None:
+            return None
 
-        if typ in ("int", "integer"):
-            return int(val)
+        try:
+            if typ in ("str", "string"):
+                return str(val)
 
-        if typ in ("float"):
-            return float(val)
+            if typ in ("int", "integer"):
+                if isinstance(val, bool):
+                    return int(val)
+                if isinstance(val, (int, float)):
+                    return int(val)
+                if isinstance(val, str):
+                    val = val.strip()
+                    if not val:
+                        return None
+                    return int(float(val))
+                return int(val)
 
-        if typ in ("bool", "boolean"):
-            return bool(val)
+            if typ in ("float",):
+                if isinstance(val, bool):
+                    return float(int(val))
+                if isinstance(val, (int, float)):
+                    return float(val)
+                if isinstance(val, str):
+                    val = val.strip()
+                    if not val:
+                        return None
+                    return float(val)
+                return float(val)
+
+            if typ in ("bool", "boolean"):
+                if isinstance(val, bool):
+                    return val
+                if isinstance(val, (int, float)):
+                    return bool(val)
+                if isinstance(val, str):
+                    lowered = val.strip().lower()
+                    if lowered in {"true", "1", "yes", "y", "on"}:
+                        return True
+                    if lowered in {"false", "0", "no", "n", "off"}:
+                        return False
+                    return None
+                return bool(val)
+        except (TypeError, ValueError):
+            return None
 
         return val
     
