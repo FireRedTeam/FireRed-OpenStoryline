@@ -20,9 +20,7 @@
     <a href="./README.md">🌏 English</a>
   </p>
   <p>
-    <a href="https://huggingface.co/FireRedTeam" target="_blank" style="margin: 2px;">
-    <img alt="Hugging Face" src="https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-FireRedTeam-ffc107?color=ffc107&logoColor=white" style="display: inline-block;"/>
-    </a>
+    <a href="https://huggingface.co/FireRedTeam" target="_blank"><img alt="Hugging Face" src="https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-FireRedTeam-ffc107?color=ffc107&logoColor=white" style="display: inline-block;"/></a>
     <img src="https://img.shields.io/badge/python-≥3.11-blue" alt="Python">
     <img src="https://img.shields.io/badge/license-Apache%202.0-blue" alt="License">
     <a href="https://image-url-2-feature-1251524319.cos.ap-shanghai.myqcloud.com/openstoryline/docs/media/others/group.jpg"><img src="https://img.shields.io/badge/Xiaohongshu-Group-E9DBFC?style=flat&logo=xiaohongshu&logoColor=white" alt="xiaohongshu"></a>
@@ -266,4 +264,4 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 ## ⭐ Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=FireRedTeam/FireRed-OpenStoryline&type=date&legend=top-left)](https://www.star-history.com/#FireRedTeam/FireRed-OpenStoryline&type=date&legend=top-left)
+<div align="center"> <p> <img width="800" src="https://api.star-history.com/svg?repos=FireRedTeam/FireRed-OpenStoryline&type=Date" alt="Star-history"> </p> </div>
