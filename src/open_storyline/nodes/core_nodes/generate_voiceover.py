@@ -14,9 +14,12 @@ import requests
 from open_storyline.nodes.core_nodes.base_node import BaseNode, NodeMeta
 from open_storyline.nodes.node_schema import GenerateVoiceoverInput
 from open_storyline.nodes.node_state import NodeState
+from open_storyline.utils.logging import get_logger
 from open_storyline.utils.parse_json import parse_json_dict
 from open_storyline.utils.prompts import get_prompt
 from open_storyline.utils.register import NODE_REGISTRY
+
+logger = get_logger(__name__)
 
 @NODE_REGISTRY.register()
 class GenerateVoiceoverNode(BaseNode):
@@ -58,6 +61,7 @@ class GenerateVoiceoverNode(BaseNode):
         provider_name = (inputs.get("provider") or "").strip()
         if not provider_name:
             node_state.node_summary.info_for_user("未找到可生成配音的tts提供商，使用默认")
+            provider_name = self._DEFAULT_PROVIDER
 
         handler = self._get_provider_handler(provider_name)
         node_state.node_summary.info_for_user(f"TTS 服务：{provider_name}")
@@ -227,12 +231,23 @@ class GenerateVoiceoverNode(BaseNode):
         path = self.server_cfg.generate_voiceover.tts_provider_params_path
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
+        except Exception as e:
+            logger.warning(
+                f"Failed to load TTS provider param schema from {path}: {type(e).__name__}: {e}"
+            )
             return {}
 
         providers = (data or {}).get("providers") or {}
+        if not isinstance(providers, dict):
+            logger.warning(f"Invalid TTS provider schema format in {path}: 'providers' should be a dict")
+            return {}
         schema = providers.get(provider_name) or {}
-        return schema if isinstance(schema, dict) else {}
+        if not isinstance(schema, dict):
+            logger.warning(
+                f"Invalid TTS param schema for provider={provider_name} in {path}: expected dict, got {type(schema).__name__}"
+            )
+            return {}
+        return schema
 
     async def _infer_tts_params_with_llm(
         self,
@@ -582,7 +597,9 @@ class GenerateVoiceoverNode(BaseNode):
 
         # output_format = hex or url
         if isinstance(audio_field, str) and audio_field.startswith("http"):
-            audio_bytes = requests.get(audio_field, timeout=120).content
+            audio_resp = requests.get(audio_field, timeout=120)
+            audio_resp.raise_for_status()
+            audio_bytes = audio_resp.content
             wav_path.write_bytes(audio_bytes)
             return
 
