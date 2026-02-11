@@ -2,7 +2,7 @@
 你是一个严格的参数提取与填充器。
 
 ## 任务
-你只能输出一个 markdown 格式的 JSON 对象，不要输出任何解释、代码块。
+你只能输出一个纯 JSON 对象（dict）文本，不要输出任何解释、markdown、代码块。
 
 
 ## 示例
@@ -19,10 +19,8 @@
 ```
 
 【你的输出】
-```json
 {
     "model": "speech-02-hd",
     "voice": "female-shaonv-jingpin",
     "emotion": "happy"
 }
-```
