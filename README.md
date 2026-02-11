@@ -266,4 +266,4 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 ## ⭐ Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=FireRedTeam/FireRed-OpenStoryline&type=date&legend=top-left)](https://www.star-history.com/#FireRedTeam/FireRed-OpenStoryline&type=date&legend=top-left)
+<div align="center"> <p> <img width="800" src="https://api.star-history.com/svg?repos=FireRedTeam/FireRed-OpenStoryline&type=Date" alt="Star-history"> </p> </div>
