@@ -83,20 +83,22 @@ Qwen3-Omni同样可以在阿里云百炼平台进行申请，具体参数如下�
 
 ## 四、TTS (文本转语音) 配置
 
-### 方案一：302.ai
+### 方案一：302.ai （不推荐）
 
-**服务地址**：https://302.ai/product/detail/302ai-mmaudio-text-to-speech
+- **服务地址**：https://302.ai/product/detail/302ai-mmaudio-text-to-speech
+- **API Key Base url**：https://api.302.ai
 
-### 方案二：MiniMax
+### 方案二：MiniMax（推荐使用）
 
-**订阅页面**：https://platform.minimax.io/subscribe/audio-subscription
+- **订阅页面**：https://platform.minimax.io/subscribe/audio-subscription
+- **API Key Base url**：https://api.minimax.chat/v1/t2a_v2
 
 **配置步骤**：
 1. 创建 API Key
 2. 访问：https://platform.minimax.io/user-center/basic-information/interface-key
 3. 获取并保存 API Key
 
-### 方案三：bytedance
+### 方案三：bytedance （推荐使用）
 1. 步骤1：开通音视频字幕生成服务
    使用旧版页面，找到音视频字幕生成服务：
    - 访问：https://console.volcengine.com/speech/service/9?AppID=8782592131

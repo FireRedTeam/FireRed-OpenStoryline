@@ -82,20 +82,22 @@ Billing Dashboard: https://billing-cost.console.aliyun.com/home
 
 ## 4. TTS (Text-to-Speech) Configuration
 
-### Option 1: 302.ai
+### Option 1: 302.ai (Not recommended)
 
-**Service URL**: https://302.ai/product/detail/302ai-mmaudio-text-to-speech
+- **Service URL**: https://302.ai/product/detail/302ai-mmaudio-text-to-speech
+- **API Key Base url**：https://api.302.ai
 
-### Option 2: MiniMax
+### Option 2: MiniMax (Recommended)
 
-**Subscription Page**: https://platform.minimax.io/subscribe/audio-subscription
+- **Subscription Page**: https://platform.minimax.io/subscribe/audio-subscription
+- **API Key Base Url**: https://api.minimax.chat/v1/t2a_v2
 
-**Configuration Steps**:
-1. Create API Key
-2. Visit: https://platform.minimax.io/user-center/basic-information/interface-key
-3. Obtain and save API Key
+- **Configuration Steps**:
+   1. Create API Key
+   2. Visit: https://platform.minimax.io/user-center/basic-information/interface-key
+   3. Obtain and save API Key
 
-### Option 3: Bytedance
+### Option 3: Bytedance (Recommended)
 1. Step 1: Enable Audio/Video Subtitle Generation Service
    Use the legacy page to find the audio/video subtitle generation service:
 
