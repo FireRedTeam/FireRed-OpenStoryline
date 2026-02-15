@@ -89,7 +89,7 @@ Billing Dashboard: https://billing-cost.console.aliyun.com/home
 
 ### Option 2: MiniMax (Recommended)
 
-- **Subscription Page**: https://platform.minimaxi.com/docs/api-reference/speech-t2a-http
+- **Service URL**: https://platform.minimaxi.com/docs/api-reference/speech-t2a-http
 - **API Key Base Url**: https://api.minimax.chat/v1/t2a_v2
 
 - **Configuration Steps**:

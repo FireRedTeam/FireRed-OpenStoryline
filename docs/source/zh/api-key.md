@@ -90,7 +90,7 @@ Qwen3-Omni同样可以在阿里云百炼平台进行申请，具体参数如下�
 
 ### 方案二：MiniMax（推荐使用）
 
-- **订阅页面**：https://platform.minimaxi.com/docs/api-reference/speech-t2a-http
+- **服务地址**：https://platform.minimaxi.com/docs/api-reference/speech-t2a-http
 - **API Key Base url**：https://api.minimax.chat/v1/t2a_v2
 
 **配置步骤**：
