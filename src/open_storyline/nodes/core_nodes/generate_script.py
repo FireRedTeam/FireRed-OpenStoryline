@@ -73,34 +73,36 @@ class GenerateScriptNode(BaseNode):
                     })
 
                 custom_script = {"group_scripts": group_scripts, "title": custom_script.get('title', '')}
+                return custom_script
             except Exception as e:
                 node_state.node_summary.info_for_llm(f"generate script failed: {type(e).__name__}: {e}")
-                group_text_map = {}
-            return custom_script
+                node_state.node_summary.info_for_user("custom_script format is invalid, fallback to auto generation.")
 
-        else:
-            groups_block = _build_groups_block_for_script(groups, duration_lookup, caption_lookup)
+        groups_block = _build_groups_block_for_script(groups, duration_lookup, caption_lookup)
 
-            system_prompt = get_prompt("generate_script.system", lang=node_state.lang)
-            if not user_request or user_request == "":
-                user_request = "No requirements"
-            user_prompt = get_prompt("generate_script.user", lang=node_state.lang, user_request=user_request, overall=overall, groups=groups_block)
+        system_prompt = get_prompt("generate_script.system", lang=node_state.lang)
+        if not user_request or user_request == "":
+            user_request = "No requirements"
+        user_prompt = get_prompt("generate_script.user", lang=node_state.lang, user_request=user_request, overall=overall, groups=groups_block)
 
-            raw = await llm.complete(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                temperature=0.1,
-                top_p=0.9,
-                max_tokens=4096,
-                model_preferences=None,
-            )
-            group_text_map: dict[str, str] = {}
-            try:
-                obj = parse_json_dict(raw)
-                group_text_map = _extract_group_text_map(obj, group_ids)
-            except Exception as e:
-                node_state.node_summary.info_for_llm(f"generate script failed: {type(e).__name__}: {e}")
-                group_text_map = {}
+        raw = await llm.complete(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            temperature=0.1,
+            top_p=0.9,
+            max_tokens=4096,
+            model_preferences=None,
+        )
+        group_text_map: dict[str, str] = {}
+        script_title = ""
+        try:
+            obj = parse_json_dict(raw)
+            group_text_map = _extract_group_text_map(obj, group_ids)
+            if isinstance(obj, dict):
+                script_title = str(obj.get("title", "") or "")
+        except Exception as e:
+            node_state.node_summary.info_for_llm(f"generate script failed: {type(e).__name__}: {e}")
+            group_text_map = {}
 
         group_scripts: list[dict[str, Any]] = []
         subtitle_index = 1
@@ -139,7 +141,7 @@ class GenerateScriptNode(BaseNode):
 
         return {
             "group_scripts": group_scripts,
-            "title": obj.get("title", ""),
+            "title": script_title,
         }
 
 def _build_duration_lookup(clip_info: list[dict[str, Any]]) -> dict[str, float]:
