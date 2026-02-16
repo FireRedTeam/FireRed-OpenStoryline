@@ -201,11 +201,16 @@ sh build_env.sh
 docker pull openstoryline/openstoryline:v1.0.0
 ```
 
+> [!NOTE]
+>
+> 启动镜像前，需要先完成 [3. 资源下载与依赖安装](#3-资源下载与依赖安装) 中的模型下载。
+
 ### 启动镜像
 ```
 docker run \
   -v $(pwd)/config.toml:/app/config.toml \
   -v $(pwd)/outputs:/app/outputs \
+  -v $(pwd)/.storyline:/app/.storyline \
   -p 7860:7860 \
   openstoryline/openstoryline:v1.0.0
 ```

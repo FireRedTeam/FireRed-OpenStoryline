@@ -192,11 +192,16 @@ $env:PYTHONPATH="src"; python -m open_storyline.mcp.server
 docker pull openstoryline/openstoryline:v1.0.0
 ```
 
+> [!NOTE]
+>
+> Before starting the container, make sure to complete the model download in [3. Resource Download & Installation](#3-resource-download--installation).
+
 ### Start the Container
 ```
 docker run \
   -v $(pwd)/config.toml:/app/config.toml \
   -v $(pwd)/outputs:/app/outputs \
+  -v $(pwd)/.storyline:/app/.storyline \
   -p 7860:7860 \
   openstoryline/openstoryline:v1.0.0
 ```
