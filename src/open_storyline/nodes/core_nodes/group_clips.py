@@ -2,7 +2,6 @@ from typing import Any, Dict
 
 from open_storyline.nodes.core_nodes.base_node import BaseNode, NodeMeta
 from open_storyline.nodes.node_state import NodeState
-from open_storyline.mcp.sampling_requester import LLMClient
 from open_storyline.nodes.node_schema import GroupClipsInput
 from src.open_storyline.utils.prompts import get_prompt
 from open_storyline.utils.parse_json import parse_json_dict
@@ -43,7 +42,10 @@ class GroupClipsNode(BaseNode):
         if not selected_clips:
             return {"groups": []}
         
-        selected_clips_captions = [clip_lookup[cid] for cid in selected_clips]
+        selected_clips_captions = [clip_lookup[cid] for cid in selected_clips if cid in clip_lookup]
+        if not selected_clips_captions:
+            return {"groups": _make_single_group_fallback(selected_clips)}
+
         clip_block = _build_clips_block(selected_clips_captions)
 
         system_prompt = get_prompt("group_clips.system", lang=node_state.lang)
@@ -59,36 +61,58 @@ class GroupClipsNode(BaseNode):
             clip_number=len(clip_block),
         )
 
-        raw = await llm.complete(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            media=None,
-            temperature=0.1,
-            top_p=0.9,
-            max_tokens=4096,
-            model_preferences=None,
+        cfg = self.server_cfg.group_clips
+        max_attempts = int(cfg.max_parse_retries) + 1
+        initial_max_tokens = _estimate_group_output_tokens(
+            clip_count=len(selected_clips),
+            base_max_tokens=int(cfg.base_max_tokens),
+            tokens_per_clip=int(cfg.tokens_per_clip),
+            max_tokens_cap=int(cfg.max_tokens_cap),
         )
+        retry_token_step = int(cfg.retry_token_step)
+        max_tokens_cap = int(cfg.max_tokens_cap)
 
-        try:
-            obj = parse_json_dict(raw)
-            groups_raw = _extract_groups_obj(obj)
+        last_error: Exception | None = None
+        for attempt in range(max_attempts):
+            max_tokens = min(max_tokens_cap, initial_max_tokens + attempt * retry_token_step)
+            attempt_user_prompt = user_prompt
+            if attempt > 0:
+                attempt_user_prompt = _append_compact_output_hint(user_prompt, node_state.lang)
 
-            groups = _normalize_groups_from_llm(
-                groups_raw=groups_raw,
-                selected_ids_set=set(selected_clips),
-            )
-            
-            node_state.node_summary.info_for_user(f"Grouping successful: {len(groups)} groups in total")
-            return {
-                "groups": groups,
-            }
-        except Exception as e:
-            
-            result = _make_single_group_fallback(selected_clips)
-            node_state.node_summary.info_for_user(f"Grouping error: {e}\nUsing default strategy")
-            return {
-                "groups": result,
-            }
+            try:
+                raw = await llm.complete(
+                    system_prompt=system_prompt,
+                    user_prompt=attempt_user_prompt,
+                    media=None,
+                    temperature=0.1,
+                    top_p=0.9,
+                    max_tokens=max_tokens,
+                    model_preferences=None,
+                )
+            except Exception as e:
+                last_error = e
+                continue
+
+            try:
+                obj = parse_json_dict(raw)
+                groups_raw = _extract_groups_obj(obj)
+                groups = _normalize_groups_from_llm(
+                    groups_raw=groups_raw,
+                    selected_ids_set=set(selected_clips),
+                )
+                node_state.node_summary.info_for_user(
+                    f"Grouping successful: {len(groups)} groups in total"
+                )
+                return {"groups": groups}
+            except Exception as e:
+                last_error = e
+                continue
+
+        result = _make_single_group_fallback(selected_clips)
+        node_state.node_summary.info_for_user(
+            f"Grouping error after {max_attempts} attempt(s): {last_error}\nUsing default strategy"
+        )
+        return {"groups": result}
 
 def _extract_groups_obj(obj: Any) -> list[dict[str, Any]]:
     if isinstance(obj, dict) and isinstance(obj.get("groups"), list):
@@ -180,7 +204,7 @@ def _make_single_group_fallback(
         }
     ]
 
-def _build_clips_block(clip_captions: list[dict[str, Any]]) -> str:
+def _build_clips_block(clip_captions: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
     Construct clips into stable text blocks
     """
@@ -196,3 +220,32 @@ def _build_clips_block(clip_captions: list[dict[str, Any]]) -> str:
         }
         blocks.append(block)
     return blocks
+
+
+def _estimate_group_output_tokens(
+    *,
+    clip_count: int,
+    base_max_tokens: int,
+    tokens_per_clip: int,
+    max_tokens_cap: int,
+) -> int:
+    estimated = base_max_tokens + max(0, clip_count) * tokens_per_clip
+    return max(256, min(max_tokens_cap, estimated))
+
+
+def _append_compact_output_hint(user_prompt: str, lang: str) -> str:
+    if str(lang).lower().startswith("zh"):
+        extra_hint = (
+            "\n\n补充约束（必须遵守）：\n"
+            "1. 输出紧凑 JSON，不要任何多余文本；\n"
+            "2. think 字段最多 80 字；\n"
+            "3. 每个 group 的 summary 最多 20 字。"
+        )
+    else:
+        extra_hint = (
+            "\n\nAdditional constraints (must follow):\n"
+            "1. Output compact JSON only, no extra text;\n"
+            "2. Keep think within 80 words;\n"
+            "3. Keep each group summary within 20 words."
+        )
+    return f"{user_prompt}{extra_hint}"
