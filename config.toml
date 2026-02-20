@@ -83,6 +83,14 @@ transnet_device = "cpu"
 sample_fps = 2.0                 # 每秒抽几帧 / Frames sampled per second
 max_frames = 64                  # 单clip抽帧上限兜底，避免长视频爆 token / Max frames per clip limit to prevent token overflow
 
+# ============= 镜头分组 / Clip Grouping =============
+[group_clips]
+base_max_tokens = 4096           # group_clips 基础输出 token 预算 / Base output token budget for group_clips
+tokens_per_clip = 48             # 每个 clip 额外 token 预算 / Extra output token budget per selected clip
+max_tokens_cap = 16384           # token 预算上限 / Upper bound of output token budget
+retry_token_step = 2048          # 每次重试增加的 token 预算 / Token increase per retry
+max_parse_retries = 2            # JSON 解析失败时重试次数 / Retry count when JSON parsing fails
+
 # ============= 文案模板 / Script Templates =============
 [script_template]
 script_template_dir = "./resource/script_templates"

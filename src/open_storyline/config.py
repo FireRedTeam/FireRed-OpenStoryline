@@ -144,6 +144,13 @@ class UnderstandClipsConfig(ConfigBaseModel):
     sample_fps: float = 2.0
     max_frames: int = 64
 
+class GroupClipsConfig(ConfigBaseModel):
+    base_max_tokens: int = Field(default=4096, ge=256, description="Base max output token budget for group_clips")
+    tokens_per_clip: int = Field(default=48, ge=0, description="Additional output token budget per selected clip")
+    max_tokens_cap: int = Field(default=16384, ge=512, description="Upper bound of max output token budget")
+    retry_token_step: int = Field(default=2048, ge=256, description="Token increment for each retry")
+    max_parse_retries: int = Field(default=2, ge=0, le=5, description="Retry count when model output parsing fails")
+
 class RecommendScriptTemplateConfig(ConfigBaseModel):
     script_template_dir: Path = Field(..., description="Script template directory.")
     script_template_info_path: Path = Field(..., description="Script template meta info path.")
@@ -243,6 +250,7 @@ class Settings(ConfigBaseModel):
     search_media: PexelsConfig
     split_shots: SplitShotsConfig
     understand_clips: UnderstandClipsConfig
+    group_clips: GroupClipsConfig = Field(default_factory=GroupClipsConfig)
     script_template: RecommendScriptTemplateConfig
     generate_voiceover: GenerateVoiceoverConfig
     select_bgm: SelectBGMConfig
