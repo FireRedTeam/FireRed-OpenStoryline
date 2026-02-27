@@ -592,7 +592,8 @@ class AudioTrackComposer:
             video_layer = video_audio_clip.with_start(0).with_volume_scaled(video_volume_scale)
 
             if video_layer.duration is not None:
-                video_layer = video_layer.subclipped(0, min(video_layer.duration, final_duration_s))
+                src_end = max(0.0, min(video_layer.duration, final_duration_s) - SUBCLIP_END_SAFETY_MARGIN_S)
+                video_layer = video_layer.subclipped(0, src_end)
 
             layers.append(video_layer)
 
@@ -966,8 +967,8 @@ class RenderVideoPipeline:
             last_t = max(0.0, clip_dur - SUBCLIP_END_SAFETY_MARGIN_S)
             # Freeze video/mask at last frame for the remaining duration
             clip = clip.time_transform(
-                lambda t, lt=last_t: min(t, lt),
-                apply_to=["mask"],
+                lambda t, lt=last_t: np.minimum(t, lt),
+                apply_to=["mask", "audio", "video"],
                 keep_duration=True,
             )
 
