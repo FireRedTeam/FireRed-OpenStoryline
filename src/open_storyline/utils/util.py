@@ -4,23 +4,45 @@ from PIL import Image, ExifTags
 
 def get_video_rotation(path):
 
-    info = json.loads(
-        subprocess.check_output([
-            "ffprobe",
-            "-v", "error",
-            "-select_streams", "v:0",
-            "-show_entries", "stream_side_data=rotation",
-            "-of", "json",
-            str(path),
-        ])
-    )
+    try:
+        info = json.loads(
+            subprocess.check_output([
+                "ffprobe",
+                "-v", "error",
+                "-select_streams", "v:0",
+                "-show_entries", "stream_side_data=rotation",
+                "-of", "json",
+                str(path),
+            ],stderr=subprocess.DEVNULL)
+        )
 
-    return next(
-        (sd["rotation"]
-         for sd in info.get("streams", [{}])[0].get("side_data_list", [])
-         if "rotation" in sd),
-        0,
-    )
+        return next(
+            (sd["rotation"]
+            for sd in info.get("streams", [{}])[0].get("side_data_list", [])
+            if "rotation" in sd),
+            0,
+        )
+    except (subprocess.CalledProcessError, json.JSONDecodeError, KeyError) as e:
+        try:
+            info = json.loads(
+            subprocess.check_output([
+                "ffprobe",
+                "-v", "error",
+                "-select_streams", "v:0",
+                "-show_entries", "stream_tags=rotate",
+                "-of", "json",
+                str(path),
+            ],stderr=subprocess.DEVNULL)
+        )
+            streams = info.get("streams", [])
+            if streams:
+                tags = streams[0].get("tags", {})
+                rotation = tags.get("rotate")
+                if rotation:
+                    return int(rotation)
+        except Exception:
+            pass
+    return 0
 
 def get_image_rotation(path: str) -> int:
     """
