@@ -445,4 +445,8 @@ class RenderVideoInput(BaseInput):
         default=False,
         description="Whether to include the original video audio track"
     )]
+    video_volume_scale: Annotated[float, Field(
+        default=1.0,
+        description="Original video audio volume multiplier, range 0.0–3.0 (1.0 = default volume)"
+    )]
 

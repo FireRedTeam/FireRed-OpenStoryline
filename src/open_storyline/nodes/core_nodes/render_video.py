@@ -90,6 +90,7 @@ SUBTITLE_PADDING_Y: int = 10
 SOURCE_VIDEO_VOLUME_SCALE = 1.0
 TTS_VOLUME_SCALE: float = 2.0
 BGM_VOLUME_SCALE: float = 0.25
+VIDEO_VOLUME_SCALE: float = 1.0
 AUDIO_DURATION_TOLERANCE_SECONDS: float = 0.05
 DEFAULT_CRF = 23
 
@@ -579,10 +580,21 @@ class AudioTrackComposer:
         *,
         voiceover_items: List[Dict[str, Any]],
         bgm_items: List[Dict[str, Any]],
+        video_audio_clip: AudioFileClip,
         final_duration_s: float,
         **kwargs,
     ):
         layers: List[Any] = []
+
+        # video original audio
+        if video_audio_clip is not None:
+            video_volume_scale = kwargs.get('video_volume_scale') or VIDEO_VOLUME_SCALE
+            video_layer = video_audio_clip.with_start(0).with_volume_scaled(video_volume_scale)
+
+            if video_layer.duration is not None:
+                video_layer = video_layer.subclipped(0, min(video_layer.duration, final_duration_s))
+
+            layers.append(video_layer)
 
         # voiceover
         for item in voiceover_items:
@@ -633,6 +645,9 @@ class AudioTrackComposer:
                 sw = item.get("source_window", {}) or {}
                 src_start = milliseconds_to_seconds(sw.get("start", 0.0))
                 src_end = milliseconds_to_seconds(sw.get("end", 0.0))
+                
+                src_end = max(src_start, src_end - SUBCLIP_END_SAFETY_MARGIN_S)
+                src_end = self._clamp_end_to_duration(src, src_end)
                 if src_end <= src_start:
                     continue
                 segments.append(src.subclipped(src_start, src_end))
@@ -694,6 +709,7 @@ class RenderVideoPipeline:
         bgm_volume_scale = inputs.get('bgm_volume_scale')
         tts_volume_scale = inputs.get('tts_volume_scale')
         include_video_audio = inputs.get('include_video_audio')
+        video_volume_scale = inputs.get('video_volume_scale')
         stroke_width = inputs.get('stroke_width')
         stroke_color = inputs.get('stroke_color')
 
@@ -713,9 +729,8 @@ class RenderVideoPipeline:
         output_canvas_size = resolve_output_canvas_size(inputs)
         media_map = build_media_id_to_path_map(load_media)
 
-        override_audio = bool(voiceover_items) or bool(bgm_items) # Default: using video audio when music and tts is None.
         cache = MediaCache(
-            include_video_audio=include_video_audio or not override_audio, 
+            include_video_audio=include_video_audio, 
             canvas_size=output_canvas_size, 
             clip_compose_mode=clip_compose_mode,
             bg_color=bg_color,
@@ -760,21 +775,20 @@ class RenderVideoPipeline:
             if subtitle_clips:
                 final_clip = CompositeVideoClip([base_clip, *subtitle_clips]).with_duration(final_duration_s)
             else:
-                final_clip = base_clip
+                final_clip: CompositeVideoClip = base_clip
 
             # Build audios: add music and tts track
-            if override_audio:
-                final_audio = audio_composer.compose(
-                    voiceover_items=voiceover_items,
-                    bgm_items=bgm_items,
-                    final_duration_s=final_duration_s,
-                    tts_volume_scale=tts_volume_scale,
-                    bgm_volume_scale=bgm_volume_scale,
-                )
-                if final_audio is not None:
-                    final_clip = final_clip.with_audio(final_audio)
-                else:
-                    final_clip = final_clip.without_audio()
+            final_audio = audio_composer.compose(
+                voiceover_items=voiceover_items,
+                bgm_items=bgm_items,
+                video_audio_clip=final_clip.audio if include_video_audio else None,
+                final_duration_s=final_duration_s,
+                tts_volume_scale=tts_volume_scale,
+                bgm_volume_scale=bgm_volume_scale,
+                video_volume_scale=video_volume_scale,
+            )
+            if final_audio is not None:
+                final_clip = final_clip.with_audio(final_audio)
 
             loop = asyncio.get_running_loop()
 
