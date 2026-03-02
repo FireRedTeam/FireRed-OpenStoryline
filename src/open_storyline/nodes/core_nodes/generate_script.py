@@ -120,7 +120,7 @@ class GenerateScriptNode(BaseNode):
                 raise ValueError(f"LLM did not generate any content, please retry")
             
             max_chars = budget.get("max_chars", 60)
-            if len(raw_text) > int(max_chars * 2.0):
+            if len(raw_text.split()) > int(max_chars * 2.0):
                 raw_text = raw_text[:max_chars].rstrip()
                 node_state.node_summary.info_for_user("The generated script was too long and has been truncated.")
 
@@ -295,7 +295,7 @@ def _extract_group_text_map(obj: Any, group_ids: list[str]) -> dict[str, str]:
     raise ValueError("Unable to recognize LLM output structure")
 
 
-_SPLIT_RE = re.compile(r"[，,。！!?？]+")
+_SPLIT_RE = re.compile(r"[，,。.！!?？]+")
 
 
 def _split_by_comma(raw_text: str) -> list[str]:
