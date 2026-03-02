@@ -1,6 +1,7 @@
 import os
 import requests
 import time
+import logging
 
 from typing import Any, Dict, Optional, ClassVar, Type, Tuple, List
 from pydantic import BaseModel
@@ -11,6 +12,8 @@ from open_storyline.nodes.core_nodes.base_node import NodeMeta, BaseNode
 from open_storyline.nodes.node_schema import SearchMediaInput
 from open_storyline.nodes.node_state import NodeState
 from open_storyline.utils.register import NODE_REGISTRY
+
+logger = logging.getLogger(__name__)
 
 SEARCH_RESULT_PER_PAGE = 40
 MAX_PHOTO_NUMBER = 10
@@ -24,6 +27,11 @@ TARGET_LONG_EDGE_PX = 1080
 
 VALID_ORIENTATIONS = {"landscape", "portrait"}
 VIDEO_QUALITY_RANK = {"sd": 0, "hd": 1, "uhd": 2}
+
+MAX_RETRIES = 3
+RETRY_INITIAL_DELAY = 1.0
+RETRY_MAX_DELAY = 10.0
+RETRY_BACKOFF_FACTOR = 2.0
 
 @NODE_REGISTRY.register()
 class SearchMediaNode(BaseNode):
@@ -89,20 +97,46 @@ class SearchMediaNode(BaseNode):
 
 
 def download_video(url: str, out_path: Path) -> None:
-    with requests.get(url, stream=True, timeout=120) as r:
-        r.raise_for_status()
-        with open(out_path, "wb") as f:
-            for chunk in r.iter_content(chunk_size=1024 * 1024):
-                if chunk:
-                    f.write(chunk)
+    last_exception = None
+    for attempt in range(MAX_RETRIES):
+        try:
+            with requests.get(url, stream=True, timeout=120) as r:
+                r.raise_for_status()
+                with open(out_path, "wb") as f:
+                    for chunk in r.iter_content(chunk_size=1024 * 1024):
+                        if chunk:
+                            f.write(chunk)
+            return
+        except requests.exceptions.RequestException as e:
+            last_exception = e
+            if attempt < MAX_RETRIES - 1:
+                delay = min(RETRY_INITIAL_DELAY * (RETRY_BACKOFF_FACTOR ** attempt), RETRY_MAX_DELAY)
+                logger.warning(f"Download video failed (attempt {attempt + 1}/{MAX_RETRIES}), retrying in {delay:.1f}s: {e}")
+                time.sleep(delay)
+            else:
+                logger.error(f"Download video failed after {MAX_RETRIES} attempts: {e}")
+    raise last_exception
 
 def search_videos(pexels_api_key: str, query: str, per_page, page) -> dict[str, Any]:
     url = "https://api.pexels.com/videos/search"
     headers = {"Authorization": pexels_api_key}
     params = {"query": query, "per_page": per_page, "page": page}
-    r = requests.get(url, headers=headers, params=params, timeout=30)
-    r.raise_for_status()
-    return r.json()
+    
+    last_exception = None
+    for attempt in range(MAX_RETRIES):
+        try:
+            r = requests.get(url, headers=headers, params=params, timeout=30)
+            r.raise_for_status()
+            return r.json()
+        except requests.exceptions.RequestException as e:
+            last_exception = e
+            if attempt < MAX_RETRIES - 1:
+                delay = min(RETRY_INITIAL_DELAY * (RETRY_BACKOFF_FACTOR ** attempt), RETRY_MAX_DELAY)
+                logger.warning(f"Search videos failed (attempt {attempt + 1}/{MAX_RETRIES}), retrying in {delay:.1f}s: {e}")
+                time.sleep(delay)
+            else:
+                logger.error(f"Search videos failed after {MAX_RETRIES} attempts: {e}")
+    raise last_exception
 
 def filter_videos(
         raw_videos: dict[str, Any],
@@ -260,20 +294,46 @@ def _pick_best_video_link(video_files: list[dict[str, Any]]) -> Optional[str]:
     return best_candidate.get("link")
 
 def download_photo(url: str, out_path: Path) -> None:
-    with requests.get(url, stream=True, timeout=120) as r:
-        r.raise_for_status()
-        with open(out_path, "wb") as f:
-            for chunk in r.iter_content(chunk_size=1024 * 1024):
-                if chunk:
-                    f.write(chunk)
+    last_exception = None
+    for attempt in range(MAX_RETRIES):
+        try:
+            with requests.get(url, stream=True, timeout=120) as r:
+                r.raise_for_status()
+                with open(out_path, "wb") as f:
+                    for chunk in r.iter_content(chunk_size=1024 * 1024):
+                        if chunk:
+                            f.write(chunk)
+            return
+        except requests.exceptions.RequestException as e:
+            last_exception = e
+            if attempt < MAX_RETRIES - 1:
+                delay = min(RETRY_INITIAL_DELAY * (RETRY_BACKOFF_FACTOR ** attempt), RETRY_MAX_DELAY)
+                logger.warning(f"Download photo failed (attempt {attempt + 1}/{MAX_RETRIES}), retrying in {delay:.1f}s: {e}")
+                time.sleep(delay)
+            else:
+                logger.error(f"Download photo failed after {MAX_RETRIES} attempts: {e}")
+    raise last_exception
 
 def search_photos(pexels_api_key: str, query: str, per_page, page) -> dict[str, Any]:
     url = "https://api.pexels.com/v1/search"
     headers = {"Authorization": pexels_api_key}
     params = {"query": query, "per_page": per_page, "page": page}
-    r = requests.get(url, headers=headers, params=params, timeout=30)
-    r.raise_for_status()
-    return r.json()
+    
+    last_exception = None
+    for attempt in range(MAX_RETRIES):
+        try:
+            r = requests.get(url, headers=headers, params=params, timeout=30)
+            r.raise_for_status()
+            return r.json()
+        except requests.exceptions.RequestException as e:
+            last_exception = e
+            if attempt < MAX_RETRIES - 1:
+                delay = min(RETRY_INITIAL_DELAY * (RETRY_BACKOFF_FACTOR ** attempt), RETRY_MAX_DELAY)
+                logger.warning(f"Search photos failed (attempt {attempt + 1}/{MAX_RETRIES}), retrying in {delay:.1f}s: {e}")
+                time.sleep(delay)
+            else:
+                logger.error(f"Search photos failed after {MAX_RETRIES} attempts: {e}")
+    raise last_exception
 
 def filter_photos(
         raw_photos: dict[str, Any],
