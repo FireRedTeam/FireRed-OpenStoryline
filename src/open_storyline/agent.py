@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Optional, Any
+import logging
 
 
 from langchain.agents import create_agent
@@ -15,6 +16,41 @@ from open_storyline.nodes.node_manager import NodeManager
 from open_storyline.mcp.hooks.chat_middleware import handle_tool_errors, on_progress, log_tool_request
 from open_storyline.mcp.sampling_handler import make_sampling_callback
 from open_storyline.skills.skills_io import load_skills
+
+logger = logging.getLogger(__name__)
+
+async def validate_api_key(base_url: str, api_key: str, model: str, provider: str = "LLM") -> bool:
+    try:
+        test_llm = ChatOpenAI(
+            model=model,
+            base_url=base_url,
+            api_key=api_key,
+            timeout=10,
+            max_retries=0,
+        )
+        await test_llm.ainvoke("test")
+        return True
+    except Exception as e:
+        error_msg = str(e).lower()
+        if "unauthorized" in error_msg or "invalid" in error_msg or "api key" in error_msg:
+            logger.error(f"{provider} API key validation failed: {e}")
+            raise ValueError(
+                f"{provider} API key is invalid. Please check your API key in config.toml or environment variables.\n"
+                f"Model: {model}\n"
+                f"Base URL: {base_url}\n"
+                f"Error: {e}"
+            )
+        elif "timeout" in error_msg or "connection" in error_msg:
+            logger.warning(f"{provider} API connection failed (network issue): {e}")
+            raise ConnectionError(
+                f"{provider} API connection failed. Please check your network or base_url.\n"
+                f"Model: {model}\n"
+                f"Base URL: {base_url}\n"
+                f"Error: {e}"
+            )
+        else:
+            logger.error(f"{provider} API validation failed with unexpected error: {e}")
+            raise
 
 @dataclass
 class ClientContext:
@@ -56,6 +92,9 @@ async def build_agent(
     llm_temperature = _get(llm_override, "temperature", cfg.llm.temperature)
     llm_max_retries = _get(llm_override, "max_retries", cfg.llm.max_retries)
 
+    # Validate LLM API key before creating the model
+    await validate_api_key(llm_base_url, llm_api_key, llm_model, "LLM")
+
     llm = ChatOpenAI(
         model=llm_model,
         base_url=llm_base_url,
@@ -77,6 +116,9 @@ async def build_agent(
     vlm_timeout = _get(vlm_override, "timeout", cfg.vlm.timeout)
     vlm_temperature = _get(vlm_override, "temperature", cfg.vlm.temperature)
     vlm_max_retries = _get(vlm_override, "max_retries", cfg.vlm.max_retries)
+
+    # Validate VLM API key before creating the model
+    await validate_api_key(vlm_base_url, vlm_api_key, vlm_model, "VLM")
 
     vlm = ChatOpenAI(
         model=vlm_model,
