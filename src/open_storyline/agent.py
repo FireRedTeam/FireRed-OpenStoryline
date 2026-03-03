@@ -3,6 +3,7 @@ from datetime import timedelta
 from typing import Optional, Any
 import logging
 
+import httpx
 
 from langchain.agents import create_agent
 from langchain_openai import ChatOpenAI
@@ -20,37 +21,99 @@ from open_storyline.skills.skills_io import load_skills
 logger = logging.getLogger(__name__)
 
 async def validate_api_key(base_url: str, api_key: str, model: str, provider: str = "LLM") -> bool:
+    """
+    Validate API key by sending a direct HTTP request to the OpenAI-compatible API.
+    
+    Uses httpx to avoid LangChain parsing errors and provides clear error messages
+    based on HTTP status codes.
+    """
+    # Ensure base_url doesn't end with trailing slash
+    base_url = base_url.rstrip("/")
+    
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    
+    # Minimal request body for validation (using max_tokens=1 for minimal cost)
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": "hi"}],
+        "max_tokens": 1,
+    }
+    
     try:
-        test_llm = ChatOpenAI(
-            model=model,
-            base_url=base_url,
-            api_key=api_key,
-            timeout=10,
-            max_retries=0,
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                f"{base_url}/v1/chat/completions",
+                headers=headers,
+                json=payload,
+            )
+            
+            if response.status_code == 200:
+                return True
+            
+            # Handle specific HTTP status codes
+            if response.status_code in (401, 403):
+                logger.error(f"{provider} API key validation failed: {response.status_code} {response.reason_phrase}")
+                raise ValueError(
+                    f"{provider} API key is invalid or unauthorized. Please check your API key in config.toml or environment variables.\n"
+                    f"Model: {model}\n"
+                    f"Base URL: {base_url}\n"
+                    f"HTTP {response.status_code}: {response.reason_phrase}"
+                )
+            elif response.status_code == 404:
+                logger.error(f"{provider} API endpoint not found: {response.status_code} {response.reason_phrase}")
+                raise ValueError(
+                    f"{provider} API endpoint not found. Please check your base_url or model name.\n"
+                    f"Model: {model}\n"
+                    f"Base URL: {base_url}\n"
+                    f"HTTP {response.status_code}: {response.reason_phrase}"
+                )
+            elif response.status_code == 429:
+                logger.warning(f"{provider} API rate limited: {response.status_code} {response.reason_phrase}")
+                raise ConnectionError(
+                    f"{provider} API rate limited. Please try again later.\n"
+                    f"Model: {model}\n"
+                    f"Base URL: {base_url}\n"
+                    f"HTTP {response.status_code}: {response.reason_phrase}"
+                )
+            elif response.status_code >= 500:
+                logger.error(f"{provider} API server error: {response.status_code} {response.reason_phrase}")
+                raise ConnectionError(
+                    f"{provider} API server error. The service may be temporarily unavailable.\n"
+                    f"Model: {model}\n"
+                    f"Base URL: {base_url}\n"
+                    f"HTTP {response.status_code}: {response.reason_phrase}"
+                )
+            else:
+                logger.error(f"{provider} API validation failed: {response.status_code} {response.reason_phrase}")
+                raise ValueError(
+                    f"{provider} API validation failed.\n"
+                    f"Model: {model}\n"
+                    f"Base URL: {base_url}\n"
+                    f"HTTP {response.status_code}: {response.reason_phrase}"
+                )
+                
+    except httpx.TimeoutException as e:
+        logger.warning(f"{provider} API connection timeout: {e}")
+        raise ConnectionError(
+            f"{provider} API connection timeout. Please check your network or base_url.\n"
+            f"Model: {model}\n"
+            f"Base URL: {base_url}\n"
+            f"Error: Connection timed out after 10 seconds"
         )
-        await test_llm.ainvoke("test")
-        return True
+    except httpx.ConnectError as e:
+        logger.warning(f"{provider} API connection failed: {e}")
+        raise ConnectionError(
+            f"{provider} API connection failed. Please check your network or base_url.\n"
+            f"Model: {model}\n"
+            f"Base URL: {base_url}\n"
+            f"Error: Unable to connect to the API endpoint"
+        )
     except Exception as e:
-        error_msg = str(e).lower()
-        if "unauthorized" in error_msg or "invalid" in error_msg or "api key" in error_msg:
-            logger.error(f"{provider} API key validation failed: {e}")
-            raise ValueError(
-                f"{provider} API key is invalid. Please check your API key in config.toml or environment variables.\n"
-                f"Model: {model}\n"
-                f"Base URL: {base_url}\n"
-                f"Error: {e}"
-            )
-        elif "timeout" in error_msg or "connection" in error_msg:
-            logger.warning(f"{provider} API connection failed (network issue): {e}")
-            raise ConnectionError(
-                f"{provider} API connection failed. Please check your network or base_url.\n"
-                f"Model: {model}\n"
-                f"Base URL: {base_url}\n"
-                f"Error: {e}"
-            )
-        else:
-            logger.error(f"{provider} API validation failed with unexpected error: {e}")
-            raise
+        logger.error(f"{provider} API validation failed with unexpected error: {e}")
+        raise
 
 @dataclass
 class ClientContext:
