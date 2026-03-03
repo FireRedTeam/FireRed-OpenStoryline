@@ -97,7 +97,6 @@ class SearchMediaNode(BaseNode):
 
 
 def download_video(url: str, out_path: Path) -> None:
-    last_exception = None
     for attempt in range(MAX_RETRIES):
         try:
             with requests.get(url, stream=True, timeout=120) as r:
@@ -108,35 +107,38 @@ def download_video(url: str, out_path: Path) -> None:
                             f.write(chunk)
             return
         except requests.exceptions.RequestException as e:
-            last_exception = e
             if attempt < MAX_RETRIES - 1:
                 delay = min(RETRY_INITIAL_DELAY * (RETRY_BACKOFF_FACTOR ** attempt), RETRY_MAX_DELAY)
                 logger.warning(f"Download video failed (attempt {attempt + 1}/{MAX_RETRIES}), retrying in {delay:.1f}s: {e}")
                 time.sleep(delay)
             else:
                 logger.error(f"Download video failed after {MAX_RETRIES} attempts: {e}")
-    raise last_exception
+                raise
+        except Exception as e:
+            logger.error(f"Download video failed due to non-network error: {e}")
+            raise
 
 def search_videos(pexels_api_key: str, query: str, per_page, page) -> dict[str, Any]:
     url = "https://api.pexels.com/videos/search"
     headers = {"Authorization": pexels_api_key}
     params = {"query": query, "per_page": per_page, "page": page}
     
-    last_exception = None
     for attempt in range(MAX_RETRIES):
         try:
             r = requests.get(url, headers=headers, params=params, timeout=30)
             r.raise_for_status()
             return r.json()
         except requests.exceptions.RequestException as e:
-            last_exception = e
             if attempt < MAX_RETRIES - 1:
                 delay = min(RETRY_INITIAL_DELAY * (RETRY_BACKOFF_FACTOR ** attempt), RETRY_MAX_DELAY)
                 logger.warning(f"Search videos failed (attempt {attempt + 1}/{MAX_RETRIES}), retrying in {delay:.1f}s: {e}")
                 time.sleep(delay)
             else:
                 logger.error(f"Search videos failed after {MAX_RETRIES} attempts: {e}")
-    raise last_exception
+                raise
+        except Exception as e:
+            logger.error(f"Search videos failed due to non-network error: {e}")
+            raise
 
 def filter_videos(
         raw_videos: dict[str, Any],
@@ -294,7 +296,6 @@ def _pick_best_video_link(video_files: list[dict[str, Any]]) -> Optional[str]:
     return best_candidate.get("link")
 
 def download_photo(url: str, out_path: Path) -> None:
-    last_exception = None
     for attempt in range(MAX_RETRIES):
         try:
             with requests.get(url, stream=True, timeout=120) as r:
@@ -305,35 +306,38 @@ def download_photo(url: str, out_path: Path) -> None:
                             f.write(chunk)
             return
         except requests.exceptions.RequestException as e:
-            last_exception = e
             if attempt < MAX_RETRIES - 1:
                 delay = min(RETRY_INITIAL_DELAY * (RETRY_BACKOFF_FACTOR ** attempt), RETRY_MAX_DELAY)
                 logger.warning(f"Download photo failed (attempt {attempt + 1}/{MAX_RETRIES}), retrying in {delay:.1f}s: {e}")
                 time.sleep(delay)
             else:
                 logger.error(f"Download photo failed after {MAX_RETRIES} attempts: {e}")
-    raise last_exception
+                raise
+        except Exception as e:
+            logger.error(f"Download photo failed due to non-network error: {e}")
+            raise
 
 def search_photos(pexels_api_key: str, query: str, per_page, page) -> dict[str, Any]:
     url = "https://api.pexels.com/v1/search"
     headers = {"Authorization": pexels_api_key}
     params = {"query": query, "per_page": per_page, "page": page}
     
-    last_exception = None
     for attempt in range(MAX_RETRIES):
         try:
             r = requests.get(url, headers=headers, params=params, timeout=30)
             r.raise_for_status()
             return r.json()
         except requests.exceptions.RequestException as e:
-            last_exception = e
             if attempt < MAX_RETRIES - 1:
                 delay = min(RETRY_INITIAL_DELAY * (RETRY_BACKOFF_FACTOR ** attempt), RETRY_MAX_DELAY)
                 logger.warning(f"Search photos failed (attempt {attempt + 1}/{MAX_RETRIES}), retrying in {delay:.1f}s: {e}")
                 time.sleep(delay)
             else:
                 logger.error(f"Search photos failed after {MAX_RETRIES} attempts: {e}")
-    raise last_exception
+                raise
+        except Exception as e:
+            logger.error(f"Search photos failed due to non-network error: {e}")
+            raise
 
 def filter_photos(
         raw_photos: dict[str, Any],
