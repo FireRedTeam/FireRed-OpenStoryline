@@ -2,7 +2,7 @@
 from __future__ import annotations
 import os
 from pathlib import Path
-from typing import Any, Optional, Literal, List
+from typing import Any, Optional, Literal, List, Dict
 import time
 
 try:
@@ -237,6 +237,25 @@ class PlanTimelineProConfig(ConfigBaseModel):
     is_text_beats: bool = False  
     # Whether text start time should align with detected music beats
 
+
+class CacheConfig(ConfigBaseModel):
+    """
+    缓存配置
+    
+    注意：
+    - config_version 变更会使所有旧缓存失效
+    - 仅支持单进程使用，多进程部署建议关闭或使用分布式后端
+    """
+    enabled: bool = True
+    cache_dir: Optional[Path] = None  # 可选，默认为 outputs_dir/.cache
+    max_size_mb: int = 1024
+    ttl_seconds: int = 86400
+    config_version: str = "v1"
+    session_isolated: bool = False
+    exclude_nodes: List[str] = Field(default_factory=list)
+    node_limits: Dict[str, int] = Field(default_factory=dict)
+
+
 class Settings(ConfigBaseModel):
     developer: DeveloperConfig
     project: ProjectConfig
@@ -257,6 +276,7 @@ class Settings(ConfigBaseModel):
     recommend_text: RecommendTextConfig
     plan_timeline: PlanTimelineConfig
     plan_timeline_pro: PlanTimelineProConfig
+    cache: CacheConfig = Field(default_factory=CacheConfig)
 
 
 def load_settings(config_path: str | Path) -> Settings:

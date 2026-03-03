@@ -16,6 +16,7 @@ from open_storyline.nodes.node_manager import NodeManager
 
 from open_storyline.storage.file import FileCompressor
 from open_storyline.utils.logging import get_logger
+from open_storyline.utils.cache import CacheManager, CacheKeyBuilder
 
 logger = get_logger(__name__)
 
@@ -377,3 +378,72 @@ class ToolInterceptor:
             print(f"{e}")
             pass
         return await handler(request)
+    
+    @staticmethod
+    async def cache_node_result(request: MCPToolCallRequest, handler):
+        """
+        Interceptor: Cache node execution results based on input parameters.
+        
+        This interceptor:
+        1. Checks if cache is enabled and node is cacheable
+        2. Builds a cache key from input parameters
+        3. Returns cached result if available
+        4. Otherwise executes the node and caches the result
+        """
+        cache_backend = CacheManager.get_backend()
+        
+        if not cache_backend:
+            return await handler(request)
+        
+        node_id = str(getattr(request, "name", "") or "")
+        args = getattr(request, "args", None)
+        
+        if not isinstance(args, dict):
+            return await handler(request)
+        
+        if node_id in cache_backend.policy.exclude_nodes:
+            return await handler(request)
+        
+        runtime = getattr(request, "runtime", None)
+        ctx = getattr(runtime, "context", None) if runtime else None
+        session_id = getattr(ctx, "session_id", None) if ctx else None
+        
+        cache_key_fields = None
+        if node_id == "search_media":
+            cache_key_fields = ["search_keyword", "photo_number", "video_number", 
+                               "orientation", "min_video_duration", "max_video_duration"]
+        
+        cache_key = CacheKeyBuilder.build(
+            node_id=node_id,
+            input_data=args,
+            policy=cache_backend.policy,
+            cache_key_fields=cache_key_fields,
+            session_id=session_id
+        )
+        
+        cached_result = cache_backend.get(cache_key)
+        if cached_result is not None:
+            tool_call_id = getattr(request.runtime, "tool_call_id", None) if runtime else None
+            
+            return Command(
+                update={
+                    "messages": [
+                        ToolMessage(content=cached_result, tool_call_id=tool_call_id)
+                    ],
+                    "status": "done"
+                },
+            )
+        
+        result = await handler(request)
+        
+        try:
+            if hasattr(result, 'update') and 'messages' in result.update:
+                messages = result.update['messages']
+                if messages and hasattr(messages[0], 'content'):
+                    content = messages[0].content
+                    if isinstance(content, dict):
+                        cache_backend.set(cache_key, content)
+        except Exception as e:
+            logger.warning(f"Failed to cache result for {node_id}: {e}")
+        
+        return result

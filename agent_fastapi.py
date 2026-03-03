@@ -47,6 +47,7 @@ if SRC_DIR not in sys.path:
 from open_storyline.agent import build_agent, ClientContext
 from open_storyline.utils.prompts import get_prompt
 from open_storyline.utils.media_handler import scan_media_dir
+from open_storyline.utils.cache import CacheManager
 from open_storyline.config import load_settings, default_config_path
 from open_storyline.config import Settings
 from open_storyline.storage.agent_memory import ArtifactStore
@@ -1474,6 +1475,7 @@ async def lifespan(app: FastAPI):
     app.state.cfg = cfg
     app.state.developer_mode = is_developer_mode(cfg)
     app.state.sessions = SessionStore(cfg)
+    CacheManager.initialize(cfg)
     yield
 
 

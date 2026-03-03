@@ -163,3 +163,35 @@ short_text_margin_rate  = 0.0       # 短文本起始边距率 / short text star
 
 text_duration_mode = "with_tts"     # with_tts | with_clip (随配音 | 随片段)
 is_text_beats      = false          # 文字对齐音乐节拍 / align text with music beats
+
+# ============= 缓存配置 / Cache Configuration =============
+# 
+# 缓存机制说明：
+# 1. 缓存基于节点输入参数计算哈希，相同输入直接返回缓存结果
+# 2. 缓存默认跨 session 共享，可节省 API 调用费用
+# 3. 配置变更时需更新 config_version 以失效旧缓存
+#
+# 何时需要更新 config_version：
+# - 更换了 LLM/VLM 模型
+# - 修改了关键节点参数（如采样帧数、脚本模板）
+# - 更新了 Prompt 模板
+# - 其他影响输出结果的配置变更
+#
+# 注意：仅支持单进程使用，多进程环境需另行设计
+#
+[cache]
+enabled = true
+cache_dir = ""                  # 可选，默认为 outputs/.cache
+max_size_mb = 1024              # 缓存总大小上限（MB）
+ttl_seconds = 86400             # 缓存过期时间（秒），默认 24 小时
+config_version = "v1"           # 配置版本，变更时请递增（v1 → v2）
+session_isolated = false        # 是否按 session 隔离缓存
+
+# 排除的节点（不缓存）
+exclude_nodes = ["render_video"]
+
+# 节点特定大小限制（MB）
+[cache.node_limits]
+search_media = 100              # 搜索结果缓存上限
+understand_clips = 500          # 视频理解结果缓存上限
+generate_script = 50            # 脚本缓存上限
