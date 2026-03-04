@@ -1,7 +1,9 @@
 from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Optional, Any
+import logging
 
+import httpx
 
 from langchain.agents import create_agent
 from langchain_openai import ChatOpenAI
@@ -15,6 +17,113 @@ from open_storyline.nodes.node_manager import NodeManager
 from open_storyline.mcp.hooks.chat_middleware import handle_tool_errors, on_progress, log_tool_request
 from open_storyline.mcp.sampling_handler import make_sampling_callback
 from open_storyline.skills.skills_io import load_skills
+
+logger = logging.getLogger(__name__)
+
+async def validate_api_key(base_url: str, api_key: str, model: str, provider: str = "LLM", timeout: float = 10.0) -> bool:
+    """
+    Validate API key by sending a direct HTTP request to the OpenAI-compatible API.
+    
+    Uses httpx to avoid LangChain parsing errors and provides clear error messages
+    based on HTTP status codes.
+    """
+    # Ensure base_url doesn't end with trailing slash
+    base_url = base_url.rstrip("/")
+    
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    
+    # Minimal request body for validation (using max_tokens=1 for minimal cost)
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": "hi"}],
+        "max_tokens": 1,
+    }
+    
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.post(
+                f"{base_url}/chat/completions",
+                headers=headers,
+                json=payload,
+            )
+            
+            if response.status_code == 200:
+                try:
+                    data = response.json()
+                except Exception:
+                    raise ValueError(f"{provider} returned non-JSON response. Check base_url/gateway.")
+                choices = data.get("choices")
+                if isinstance(choices, list) and len(choices) > 0:
+                    return True
+                raise ValueError(
+                    f"{provider} returned a non-OpenAI-compatible response for chat.completions. "
+                    f"Please check gateway behavior, base_url routing, or auth configuration."
+                )
+            
+            # Handle specific HTTP status codes
+            if response.status_code in (401, 403):
+                logger.error(f"{provider} API key validation failed: {response.status_code} {response.reason_phrase}")
+                raise ValueError(
+                    f"{provider} API key is invalid or unauthorized. Please check your API key in config.toml or environment variables.\n"
+                    f"Model: {model}\n"
+                    f"Base URL: {base_url}\n"
+                    f"HTTP {response.status_code}: {response.reason_phrase}"
+                )
+            elif response.status_code == 404:
+                logger.error(f"{provider} API endpoint not found: {response.status_code} {response.reason_phrase}")
+                raise ValueError(
+                    f"{provider} API endpoint not found. Please check your base_url or model name.\n"
+                    f"Model: {model}\n"
+                    f"Base URL: {base_url}\n"
+                    f"HTTP {response.status_code}: {response.reason_phrase}"
+                )
+            elif response.status_code == 429:
+                logger.warning(f"{provider} API rate limited: {response.status_code} {response.reason_phrase}")
+                raise ConnectionError(
+                    f"{provider} API rate limited. Please try again later.\n"
+                    f"Model: {model}\n"
+                    f"Base URL: {base_url}\n"
+                    f"HTTP {response.status_code}: {response.reason_phrase}"
+                )
+            elif response.status_code >= 500:
+                logger.error(f"{provider} API server error: {response.status_code} {response.reason_phrase}")
+                raise ConnectionError(
+                    f"{provider} API server error. The service may be temporarily unavailable.\n"
+                    f"Model: {model}\n"
+                    f"Base URL: {base_url}\n"
+                    f"HTTP {response.status_code}: {response.reason_phrase}"
+                )
+            else:
+                logger.error(f"{provider} API validation failed: {response.status_code} {response.reason_phrase}")
+                raise ValueError(
+                    f"{provider} API validation failed.\n"
+                    f"Model: {model}\n"
+                    f"Base URL: {base_url}\n"
+                    f"HTTP {response.status_code}: {response.reason_phrase}"
+                )
+                
+    except httpx.TimeoutException as e:
+        logger.warning(f"{provider} API connection timeout: {e}")
+        raise ConnectionError(
+            f"{provider} API connection timeout. Please check your network or base_url.\n"
+            f"Model: {model}\n"
+            f"Base URL: {base_url}\n"
+            f"Error: Connection timed out after 10 seconds"
+        )
+    except httpx.ConnectError as e:
+        logger.warning(f"{provider} API connection failed: {e}")
+        raise ConnectionError(
+            f"{provider} API connection failed. Please check your network or base_url.\n"
+            f"Model: {model}\n"
+            f"Base URL: {base_url}\n"
+            f"Error: Unable to connect to the API endpoint"
+        )
+    except Exception as e:
+        logger.error(f"{provider} API validation failed with unexpected error: {e}")
+        raise
 
 @dataclass
 class ClientContext:
@@ -56,6 +165,9 @@ async def build_agent(
     llm_temperature = _get(llm_override, "temperature", cfg.llm.temperature)
     llm_max_retries = _get(llm_override, "max_retries", cfg.llm.max_retries)
 
+    # Validate LLM API key before creating the model
+    await validate_api_key(llm_base_url, llm_api_key, llm_model, "LLM", llm_timeout)
+
     llm = ChatOpenAI(
         model=llm_model,
         base_url=llm_base_url,
@@ -77,6 +189,9 @@ async def build_agent(
     vlm_timeout = _get(vlm_override, "timeout", cfg.vlm.timeout)
     vlm_temperature = _get(vlm_override, "temperature", cfg.vlm.temperature)
     vlm_max_retries = _get(vlm_override, "max_retries", cfg.vlm.max_retries)
+
+    # Validate VLM API key before creating the model
+    await validate_api_key(vlm_base_url, vlm_api_key, vlm_model, "VLM", vlm_timeout)
 
     vlm = ChatOpenAI(
         model=vlm_model,
