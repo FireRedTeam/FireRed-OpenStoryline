@@ -75,10 +75,10 @@ DEFAULT_LLM_API_NAME = os.getenv("DEEPSEEK_API_NAME", "deepseek-chat")
 DEFAULT_VLM_API_KEY = os.getenv("GLM_V4_6_API_KEY")
 DEFAULT_VLM_API_URL = os.getenv("GLM_V4_6_API_URL")
 DEFAULT_VLM_API_NAME = os.getenv("GLM_V4_6_API_NAME", "qwen3-vl-8b-instruct")
-print("DEEPSEEK_API_KEY exists:", bool(os.getenv("DEEPSEEK_API_KEY")))
-print("QWEN3_VL_8B_API_KEY exists:", bool(os.getenv("QWEN3_VL_8B_API_KEY")))
-print("DEEPSEEK_API_URL:", repr(os.getenv("DEEPSEEK_API_URL")))
-print("QWEN3_VL_8B_API_URL:", repr(os.getenv("QWEN3_VL_8B_API_URL")))
+print("[env fallback only] DEEPSEEK_API_KEY exists:", bool(os.getenv("DEEPSEEK_API_KEY")))
+print("[env fallback only] QWEN3_VL_8B_API_KEY exists:", bool(os.getenv("QWEN3_VL_8B_API_KEY")))
+print("[env fallback only] DEEPSEEK_API_URL:", repr(os.getenv("DEEPSEEK_API_URL")))
+print("[env fallback only] QWEN3_VL_8B_API_URL:", repr(os.getenv("QWEN3_VL_8B_API_URL")))
 
 def debug_traceback_print(cfg: Settings):
     if cfg.developer.developer_mode:
@@ -103,10 +103,16 @@ def _env_fallback_for_model(model_name: str) -> Tuple[str, str]:
         return (_s(os.getenv("QWEN3_VL_8B_API_URL")), _s(os.getenv("QWEN3_VL_8B_API_KEY")))
     return ("", "")
 
-def _resolve_default_model_override(cfg: Settings, model_name: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+def _resolve_default_model_override(
+    cfg: Settings,
+    model_name: str,
+    *,
+    prefer: Optional[str] = None,
+) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """
     1. get config from [developer.chat_models_config."<model_name>"]
-    2. rollback to env
+    2. rollback to [llm]/[vlm] in config.toml (preferred section first)
+    3. rollback to env
     """
     model_name = _s(model_name)
     if not model_name:
@@ -123,6 +129,30 @@ def _resolve_default_model_override(cfg: Settings, model_name: str) -> Tuple[Opt
 
     base_url = _norm_url(model_cfg.get("base_url"))
     api_key = _s(model_cfg.get("api_key"))
+
+    if not base_url or not api_key:
+        candidates: List[Any] = []
+        llm_cfg = getattr(cfg, "llm", None)
+        vlm_cfg = getattr(cfg, "vlm", None)
+
+        if prefer == "llm":
+            candidates = [llm_cfg]
+        elif prefer == "vlm":
+            candidates = [vlm_cfg]
+        else:
+            candidates = [llm_cfg, vlm_cfg]
+
+        for sec in candidates:
+            if sec is None:
+                continue
+            if _s(getattr(sec, "model", "")) != model_name:
+                continue
+            if not base_url:
+                base_url = _norm_url(getattr(sec, "base_url", ""))
+            if not api_key:
+                api_key = _s(getattr(sec, "api_key", ""))
+            if base_url and api_key:
+                break
 
     if not base_url or not api_key:
         env_url, env_key = _env_fallback_for_model(model_name)
@@ -145,6 +175,7 @@ def _resolve_default_model_override(cfg: Settings, model_name: str) -> Tuple[Opt
         return None, (
             f"cannot find base_url/api_key of default model: {model_name}. "
             f"please fill in base_url/api_key of [developer.chat_models_config.\"{model_name}\" in config.toml]"
+            f"or in [llm]/[vlm] with model=\"{model_name}\" "
             f"or set environment variables（DEEPSEEK_API_URL/DEEPSEEK_API_KEY / QWEN3_VL_8B_API_URL/QWEN3_VL_8B_API_KEY）。"
         )
 
@@ -1178,7 +1209,7 @@ class ChatSession:
                 raise RuntimeError("please fill in model/base_url/api_key of custom LLM")
             llm_override = self.custom_llm_config
         else:
-            llm_override, err = _resolve_default_model_override(self.cfg, self.chat_model_key)
+            llm_override, err = _resolve_default_model_override(self.cfg, self.chat_model_key, prefer="llm")
             if err:
                 raise RuntimeError(err)
 
@@ -1188,7 +1219,7 @@ class ChatSession:
                 raise RuntimeError("please fill in model/base_url/api_key of custom VLM")
             vlm_override = self.custom_vlm_config
         else:
-            vlm_override, err = _resolve_default_model_override(self.cfg, self.vlm_model_key)
+            vlm_override, err = _resolve_default_model_override(self.cfg, self.vlm_model_key, prefer="vlm")
             if err:
                 raise RuntimeError(err)
 
