@@ -244,6 +244,15 @@ def is_developer_mode(cfg: Settings) -> bool:
 def _abs(p: str) -> str:
     return os.path.abspath(os.path.expanduser(p))
 
+def _format_exc(e: BaseException) -> str:
+    excs = getattr(e, "exceptions", None)
+    if excs:
+        parts = [f"{type(e).__name__}: {e}"]
+        for i, sub in enumerate(excs, 1):
+            parts.append(f"\n--- sub-exception #{i}: {type(sub).__name__}: {sub} ---\n")
+            parts.extend(traceback.format_exception(type(sub), sub, sub.__traceback__))
+        return "".join(parts)
+    return "".join(traceback.format_exception(type(e), e, e.__traceback__))
 
 def resolve_media_dir(cfg_media_dir: str, session_id: str) -> str:
     root = _abs(cfg_media_dir).rstrip("/\\")
@@ -2275,6 +2284,7 @@ async def ws_chat(ws: WebSocket, session_id: str):
                             await sess.ensure_agent()
                         except Exception as e:
                             await ws_send(ws, "error", {"message": f"{type(e).__name__}: {e}"})
+                            logger.error(_format_exc(e))
                             continue
 
                         sess._ensure_system_prompt()
@@ -2377,6 +2387,7 @@ async def ws_chat(ws: WebSocket, session_id: str):
                             except Exception as e:
                                 # 关键：异常也要让主循环“可结束”，否则 UI 卡死
                                 await out_q.put(("agent.error", f"{type(e).__name__}: {e}"))
+                                logger.error(_format_exc(e))
 
 
                         async def safe_send(type_: str, data: Any = None) -> bool:
@@ -2789,6 +2800,7 @@ async def ws_chat(ws: WebSocket, session_id: str):
                             if was_interrupted:
                                 return
                             await ws_send(ws, "error", {"message": f"{type(e).__name__}: {e}", "partial_text": (seg_text or "").strip()})
+                            logger.error(_format_exc(e))
                             return
                         finally:
                             # 结束 cancel_wait_task
