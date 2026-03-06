@@ -343,8 +343,7 @@ class ToolInterceptor:
                         continue
                     args.setdefault(key, str(value).strip())
         except Exception as e:
-            print(f"{e}")
-            pass
+            logger.warning(f"Failed to inject TTS config: {e}")
         return await handler(request)
     
     @staticmethod
@@ -374,6 +373,5 @@ class ToolInterceptor:
             args["pexels_api_key"] = key
 
         except Exception as e:
-            print(f"{e}")
-            pass
+            logger.warning(f"Failed to inject pexels API key: {e}")
         return await handler(request)
