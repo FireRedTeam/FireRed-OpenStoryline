@@ -971,7 +971,11 @@ class MediaStore:
             raise HTTPException(status_code=409, detail=f"media already exists: {store_filename}")
 
         # move tmp -> final
-        os.replace(src_path, save_path)
+        try:
+            os.replace(src_path, save_path)
+        except OSError:
+            logger.exception("Failed to save uploaded media file")
+            raise HTTPException(status_code=500, detail="failed to save media file")
 
         thumb_path: Optional[str] = None
         if kind in ("image", "video"):
