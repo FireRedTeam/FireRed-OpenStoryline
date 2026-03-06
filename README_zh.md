@@ -142,7 +142,8 @@ sh build_env.sh
   - Step 2: 下载资源
   
     ```bash
-    sh download.sh
+    chmod +x download.sh
+    ./download.sh
     ```
   
   - Step 3: 安装依赖
