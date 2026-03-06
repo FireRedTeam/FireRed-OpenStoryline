@@ -132,13 +132,14 @@ sh build_env.sh
     ```
   - Step 2: Download Resources
 
-    ```
-    sh download.sh
+    ```bash
+    chmod +x download.sh
+    ./download.sh
     ```
   
   - Step 3: Install Dependencies
 
-    ```
+    ```bash
     pip install -r requirements.txt
     ```
 
