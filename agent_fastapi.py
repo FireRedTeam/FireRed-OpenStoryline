@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import mimetypes
 import os
 import sys
@@ -971,7 +972,17 @@ class MediaStore:
             raise HTTPException(status_code=409, detail=f"media already exists: {store_filename}")
 
         # move tmp -> final
-        os.replace(src_path, save_path)
+        try:
+            os.replace(src_path, save_path)
+        except OSError as e:
+            logger.exception("Failed to save uploaded media file")
+            if e.errno == errno.ENOSPC:
+                detail = "Failed to save media: disk full"
+            elif e.errno in (errno.EACCES, errno.EPERM):
+                detail = "Failed to save media: permission denied"
+            else:
+                detail = f"Failed to save media file: {e}"
+            raise HTTPException(status_code=500, detail=detail)
 
         thumb_path: Optional[str] = None
         if kind in ("image", "video"):
