@@ -133,8 +133,14 @@ def register(server: FastMCP, cfg: Settings) -> None:
         try:
             store = ArtifactStore(artifacts_dir=params.get('artifacts_dir', ".storyline/.server_cache"), session_id=session_id)
             meta, data = store.load_result(params['query_artifact_id'])
-            summary = "History information retrieved successfully"
-            isError = False
+            
+            if meta is None:
+                summary = f"History artifact not found: {params['query_artifact_id']}"
+                isError = True
+                data = {"error": "artifact_not_found", "artifact_id": params['query_artifact_id']}
+            else:
+                summary = "History information retrieved successfully"
+                isError = False
         except Exception as e:
             traceback_info = ''.join(traceback.format_exception(e))
             summary = f"History read execution failed: {params['query_artifact_id']}\n {traceback_info}",

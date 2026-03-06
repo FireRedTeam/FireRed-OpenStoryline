@@ -63,7 +63,10 @@ class ToolInterceptor:
             def load_collected_data(collected_node, input_data, store):
                 """Load collected node data"""
                 for collect_kind, artifact_meta in collected_node.items():
-                    _, prior_node_output = store.load_result(artifact_meta.artifact_id)
+                    meta, prior_node_output = store.load_result(artifact_meta.artifact_id)
+                    if meta is None:
+                        logger.warning(f"Failed to load collected data: {prior_node_output}")
+                        continue
                     compress_payload_to_base64(prior_node_output['payload'])
                     input_data[collect_kind] = prior_node_output['payload']
 
