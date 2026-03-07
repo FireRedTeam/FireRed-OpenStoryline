@@ -20,3 +20,5 @@ tomli
 faiss-cpu==1.13.2
 openai==2.16.0
 emoji==2.15.0
+Pillow==11.3.0
+pillow-heif==0.16.0

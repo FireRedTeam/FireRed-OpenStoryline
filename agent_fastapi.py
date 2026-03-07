@@ -17,6 +17,10 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple, Set
 from contextlib import asynccontextmanager
 from starlette.websockets import WebSocketState, WebSocketDisconnect
+
+# Register HEIC support globally
+import pillow_heif  # noqa # pylint: disable=unused-import
+pillow_heif.register_heif_opener()
 try:
     import tomllib          # Python 3.11+ # type: ignore
 except ModuleNotFoundError:
@@ -2353,7 +2357,7 @@ async def ws_chat(ws: WebSocket, session_id: str):
 
                         async def pump_agent():
                             nonlocal new_messages
-                            try:
+                            async def pump_stream():
                                 stream = sess.agent.astream(
                                     {"messages": sess.lc_messages},
                                     context=sess.client_context,
@@ -2374,6 +2378,9 @@ async def ws_chat(ws: WebSocket, session_id: str):
                                                 new_messages.extend(msgs)
 
                                 await out_q.put(("agent.done", None))
+
+                            try:
+                                await pump_stream()
                             except asyncio.CancelledError:
                                 # 被用户打断 / 连接关闭导致的取消，不属于“真正异常”
                                 # 不要发 agent.error；给主循环一个 cancelled 信号即可
@@ -2812,7 +2819,7 @@ async def ws_chat(ws: WebSocket, session_id: str):
                                 pump_task.cancel()
                             if pump_task:
                                 try:
-                                    await asyncio.wait_for(pump_task, timeout=2.0)
+                                    await asyncio.wait_for(pump_task, timeout=5.0)
                                 except asyncio.TimeoutError:
                                     debug_traceback_print(app.state.cfg)
                                     pass

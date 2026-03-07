@@ -1,6 +1,8 @@
 
 import subprocess, json
 from PIL import Image, ExifTags
+import pillow_heif  # noqa # pylint: disable=unused-import
+pillow_heif.register_heif_opener()
 
 def get_video_rotation(path):
 

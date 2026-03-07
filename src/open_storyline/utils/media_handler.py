@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 from typing import Union
 
-_MEDIA_EXTS_IMG = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}
+_MEDIA_EXTS_IMG = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".heic"}
 _MEDIA_EXTS_VID = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"}
 
 def scan_media_dir(media_dir: Union[Path, str]) -> dict:

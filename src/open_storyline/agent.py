@@ -20,7 +20,7 @@ from open_storyline.skills.skills_io import load_skills
 
 logger = logging.getLogger(__name__)
 
-async def validate_api_key(base_url: str, api_key: str, model: str, provider: str = "LLM", timeout: float = 10.0) -> bool:
+async def validate_api_key(base_url: str, api_key: str, model: str, provider: str = "LLM", timeout: float = 9999.0) -> bool:
     """
     Validate API key by sending a direct HTTP request to the OpenAI-compatible API.
     
@@ -111,7 +111,7 @@ async def validate_api_key(base_url: str, api_key: str, model: str, provider: st
             f"{provider} API connection timeout. Please check your network or base_url.\n"
             f"Model: {model}\n"
             f"Base URL: {base_url}\n"
-            f"Error: Connection timed out after 10 seconds"
+            f"Error: Connection timed out after 9999 seconds"
         )
     except httpx.ConnectError as e:
         logger.warning(f"{provider} API connection failed: {e}")
