@@ -17,10 +17,23 @@ VIDEO_EXTS = {
     ".mp4", ".mov", ".mkv", ".avi"
 }
 IMAGE_EXTS = {
-    ".jpg", ".jpeg", ".png", ".webp", ".bmp"
+    ".jpg", ".jpeg", ".png", ".webp", ".bmp", ".heic"
 }
 
+def _convert_heic_to_jpg(heic_path: Path) -> Path:
+    """Convert HEIC image to JPG format and return the new path."""
+    import pillow_heif  # noqa # pylint: disable=unused-import
+    pillow_heif.register_heif_opener()
+    from PIL import Image
+    
+    jpg_path = heic_path.with_suffix('.jpg')
+    with Image.open(heic_path) as img:
+        img.convert('RGB').save(jpg_path, 'JPEG', quality=95)
+    return jpg_path
+
 def _image_metadata_from_path(path: Path) -> dict[str, Any]:
+    import pillow_heif  # noqa # pylint: disable=unused-import
+    pillow_heif.register_heif_opener()
     from PIL import Image, ImageOps
 
     with Image.open(path) as img:
@@ -135,6 +148,9 @@ class LoadMediaNode(BaseNode):
                 metadata = _video_metadata_from_path(path)
                 media_type = "video"
             elif suffix in IMAGE_EXTS:
+                if suffix == ".heic":
+                    # Convert HEIC to JPG for model compatibility
+                    path = _convert_heic_to_jpg(path)
                 metadata = _image_metadata_from_path(path)
                 media_type = "image"
             else:

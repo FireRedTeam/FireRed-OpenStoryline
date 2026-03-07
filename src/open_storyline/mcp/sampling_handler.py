@@ -7,6 +7,8 @@ from typing import Any, Dict, List, Tuple
 from urllib.parse import urlparse
 
 from PIL import Image
+import pillow_heif  # noqa # pylint: disable=unused-import
+pillow_heif.register_heif_opener()
 from moviepy.video.io.VideoFileClip import VideoFileClip
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
