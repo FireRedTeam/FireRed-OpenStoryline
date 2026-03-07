@@ -34,6 +34,9 @@ htmlcov/
 .pyre/
 .cache/
 
+# 本地 PR 描述草稿（仅用于复制到 GitHub PR，不提交到仓库）
+PR_DESCRIPTION.md
+
 # IDE / 编辑器配置
 .vscode/
 .idea/
