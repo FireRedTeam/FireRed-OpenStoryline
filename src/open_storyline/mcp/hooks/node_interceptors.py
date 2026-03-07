@@ -20,15 +20,15 @@ from open_storyline.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-# Hosts that indicate Agent and MCP server are on the same machine (path-only, no base64).
-_LOCAL_CONNECT_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+# Hosts that indicate Agent and MCP server are on the same machine (path-only, no base64). 0.0.0.0 for Docker.
+_LOCAL_CONNECT_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "0.0.0.0"})
 
 
 def should_inline_media_as_base64(server_cfg=None) -> bool:
     """
     Whether to inline media as base64 in MCP requests.
-    - Same machine (connect_host in 127.0.0.1, localhost, ::1): return False → path-only, small payload.
-    - Remote (other host): return True → base64 so the other machine can receive file content.
+    - inline_media "always" -> True (base64); "never" -> False (path-only); "auto" -> by connect_host.
+    - In "auto": connect_host in 127.0.0.1/localhost/::1/0.0.0.0 -> False (path-only), else True (base64).
     """
     if server_cfg is None:
         return False
@@ -36,6 +36,12 @@ def should_inline_media_as_base64(server_cfg=None) -> bool:
         mcp = getattr(server_cfg, "local_mcp_server", None)
         if mcp is None:
             return False
+        mode = getattr(mcp, "inline_media", "auto")
+        if mode == "always":
+            return True
+        if mode == "never":
+            return False
+        # auto
         host = (getattr(mcp, "connect_host", None) or "").strip().lower()
         if not host:
             return False
