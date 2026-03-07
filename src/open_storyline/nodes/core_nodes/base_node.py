@@ -71,26 +71,44 @@ class BaseNode(ABC):
         }
 
     def _load_item(self, node_state: NodeState, user_info: Dict[str,str], item: Dict[str,Any]):
-        new_item:Dict[str,Any] = {}
+        new_item: Dict[str, Any] = {}
         item_base64 = item.pop("base64", None)
         item_md5 = item.pop("md5", None)
         item_path = item.pop("path", None)
         new_item.update(item)
 
-
         if item_base64 and item_path:
-            item_save_path = self.server_cache_dir / user_info['session_id']/ user_info['artifact_id'] / os.path.basename(item_path)
+            item_save_path = self.server_cache_dir / user_info['session_id'] / user_info['artifact_id'] / os.path.basename(item_path)
             FileCompressor.decompress_from_string(item_base64, item_save_path)
             new_item['path'] = str(item_save_path.relative_to(os.getcwd()))
             new_item['orig_path'] = str(item_path)
             new_item['orig_md5'] = item_md5
+        elif item_path:
+            # Path-only mode (local MCP): path is relative to media_dir; resolve without depending on cwd
+            if os.path.isabs(item_path):
+                full_path = Path(item_path)
+            else:
+                media_root = Path(self.server_cfg.project.media_dir).resolve()
+                full_path = (media_root / item_path).resolve()
+                try:
+                    full_path.relative_to(media_root)
+                except ValueError:
+                    raise ValueError(f"path-only path must be under media_dir: {item_path!r}")
+            new_item['path'] = str(full_path)
+            new_item['orig_path'] = str(item_path)
+            new_item['orig_md5'] = item_md5
         return new_item
 
-    def _pack_item(self, node_state: NodeState, item: Dict[str,Any]):
+    def _pack_item(self, node_state: NodeState, item: Dict[str, Any]):
         orig_path = item.pop('orig_path', None)
         orig_md5 = item.pop('orig_md5', None)
         server_save_path = item.pop('path', None)
         if server_save_path:
+            # Path-only mode: orig_path set and orig_md5 None means we received path-only, return as-is
+            if orig_path and orig_md5 is None:
+                node_state.node_summary.debug_for_dev(f"[node] node_id: {self.meta.node_id} return `path` only (local mode)")
+                item['path'] = orig_path
+                return item
             compress_data = FileCompressor.compress_and_encode(server_save_path)
             if orig_path and orig_md5 and compress_data.md5 == orig_md5:
                 node_state.node_summary.debug_for_dev(f"[node] node_id: {self.meta.node_id} change `path` change to {orig_path}")

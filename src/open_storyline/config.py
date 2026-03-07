@@ -118,6 +118,8 @@ class MCPConfig(ConfigBaseModel):
     connect_host: str = "127.0.0.1"
     port: int = Field(ge=1, le=65535)
     path: str = "/mcp"
+    # "auto" = by connect_host (127.0.0.1/localhost/::1/0.0.0.0 -> path-only); "always" = base64; "never" = path-only (Docker/LAN 同机可设 never)
+    inline_media: Literal["auto", "always", "never"] = "auto"
 
     json_response: bool = True
     stateless_http: bool = False
