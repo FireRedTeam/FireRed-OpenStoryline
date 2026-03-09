@@ -152,6 +152,10 @@ class ToolInterceptor:
                         if isinstance(data, dict):
                             paths = data.get('payload', {}).get('search_media') or []
                             for p in paths:
+                                # search_media returns a list of {"path": "..."} dicts (and may
+                                # also return list[str] in older versions); support both.
+                                if isinstance(p, dict):
+                                    p = p.get("path")
                                 if not p or not isinstance(p, str):
                                     continue
                                 norm = str(Path(p).resolve()) if not os.path.isabs(p) else p
