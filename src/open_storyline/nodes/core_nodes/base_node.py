@@ -6,6 +6,7 @@ from pydantic import BaseModel, ValidationError
 from typing import Any, Dict, List, Optional, Union, ClassVar
 import json
 import traceback
+import re
 
 from open_storyline.config import Settings
 from open_storyline.nodes.node_state import NodeState
@@ -104,6 +105,28 @@ class BaseNode(ABC):
             new_item['orig_md5'] = item_md5
         return new_item
 
+    _FILE_EXT_RE = re.compile(
+        r"\.(mp4|mov|avi|mkv|webm|mp3|wav|m4a|aac|flac|ogg|png|jpg|jpeg|gif|bmp|webp|json)$",
+        re.IGNORECASE,
+    )
+
+    @classmethod
+    def _looks_like_file_path(cls, p: Any) -> bool:
+        if not isinstance(p, str):
+            return False
+        s = p.strip()
+        if not s:
+            return False
+        if "://" in s:
+            return False
+        if cls._FILE_EXT_RE.search(s):
+            return True
+        if "\\" in s or "/" in s:
+            return True
+        if len(s) >= 2 and s[1] == ":":
+            return True
+        return False
+
     def _pack_item(self, node_state: NodeState, item: Dict[str, Any]):
         orig_path = item.pop('orig_path', None)
         orig_md5 = item.pop('orig_md5', None)
@@ -116,8 +139,12 @@ class BaseNode(ABC):
         inline_base64 = should_inline_media_as_base64(self.server_cfg)
 
         # Prefer a media_dir-relative path for responses when possible, with absolute
-        # path as a fallback. orig_path, if present, is treated as the preferred
-        # client-visible path but does not control the transport mode.
+        # path as a fallback.
+        #
+        # Important: in path-only mode, returning a relative `orig_path` that is NOT
+        # under media_dir can break downstream nodes, because the server resolves
+        # relative path-only inputs under project.media_dir. For such cases (e.g. BGM
+        # assets under resource/bgms), fall back to an absolute path.
         client_path = orig_path or server_save_path
         try:
             media_root = Path(self.server_cfg.project.media_dir).resolve()
@@ -128,9 +155,15 @@ class BaseNode(ABC):
                 client_rel = Path(server_save_path).resolve().relative_to(media_root)
                 client_path = str(client_rel)
             except Exception:
-                client_path = str(client_path)
+                if orig_path and os.path.isabs(str(orig_path)):
+                    client_path = str(orig_path)
+                else:
+                    client_path = str(Path(server_save_path).resolve())
         else:
-            client_path = str(client_path)
+            if orig_path and os.path.isabs(str(orig_path)):
+                client_path = str(orig_path)
+            else:
+                client_path = str(Path(server_save_path).resolve())
 
         if not inline_base64:
             node_state.node_summary.debug_for_dev(
@@ -173,8 +206,11 @@ class BaseNode(ABC):
                 # List: load base64 data and save to server cache
                 loaded_input[k] = [self._load_item(node_state, user_info, item) for item in payload_input]
             elif isinstance(payload_input, dict):
-                # Dict: recursively process nested data (without saving)
-                loaded_input[k] = self.load_inputs_from_client(node_state, payload_input, user_info, save=False)
+                # Dict: if it looks like a file-path payload, load it like an item; otherwise recurse.
+                if self._looks_like_file_path(payload_input.get("path")):
+                    loaded_input[k] = self._load_item(node_state, user_info, payload_input)
+                else:
+                    loaded_input[k] = self.load_inputs_from_client(node_state, payload_input, user_info, save=False)
             elif isinstance(payload_input, LLMClient):
                 kwargs[k] = payload_input
             else:
@@ -204,7 +240,11 @@ class BaseNode(ABC):
             if isinstance(payload_output, list) and all(isinstance(item, dict) for item in payload_output):
                 packed_output[k] = [self._pack_item(node_state, item) for item in payload_output]
             elif isinstance(payload_output, dict):
-                packed_output[k] = self.pack_outputs_to_client(node_state, payload_output)
+                # Dict: if it looks like a file-path payload, pack it like an item; otherwise recurse.
+                if self._looks_like_file_path(payload_output.get("path")):
+                    packed_output[k] = self._pack_item(node_state, payload_output)
+                else:
+                    packed_output[k] = self.pack_outputs_to_client(node_state, payload_output)
             else:
                 packed_output[k] = outputs[k]
         return packed_output
