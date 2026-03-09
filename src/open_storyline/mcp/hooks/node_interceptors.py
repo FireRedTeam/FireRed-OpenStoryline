@@ -107,6 +107,10 @@ class ToolInterceptor:
                 input_data['inputs'] = []
                 seen_paths: set = set()
                 media_dir = Path(context.media_dir)
+                try:
+                    project_media_root = Path(server_cfg.project.media_dir).resolve()
+                except Exception:
+                    project_media_root = None
                 for file_name in os.listdir(media_dir):
                     path = media_dir / file_name
                     if path.is_dir():
@@ -120,18 +124,24 @@ class ToolInterceptor:
                             "md5": compress_data.md5,
                         })
                     else:
-                        # Path-only (local): path relative to media_dir so MCP can resolve without depending on cwd
-                        media_root = Path(context.media_dir).resolve()
-                        try:
-                            rel_path = str(path.resolve().relative_to(media_root))
-                        except ValueError:
-                            # e.g. symlink outside media_dir; fallback to absolute path
-                            rel_path = str(path.resolve())
-                        if rel_path not in seen_paths:
-                            seen_paths.add(rel_path)
+                        # Path-only (local):
+                        # - Prefer a path relative to project.media_dir (server contract) when possible.
+                        # - Otherwise, fall back to absolute path (e.g. FastAPI session subdir is outside project.media_dir).
+                        abs_path = path.resolve()
+                        rel_or_abs: str
+                        if project_media_root is not None:
+                            try:
+                                rel_or_abs = str(abs_path.relative_to(project_media_root))
+                            except ValueError:
+                                rel_or_abs = str(abs_path)
+                        else:
+                            rel_or_abs = str(abs_path)
+
+                        if rel_or_abs not in seen_paths:
+                            seen_paths.add(rel_or_abs)
                             input_data['inputs'].append({
-                                "path": rel_path,
-                                "orig_path": rel_path,
+                                "path": rel_or_abs,
+                                "orig_path": rel_or_abs,
                                 "orig_md5": None,
                             })
                 # Path-only mode: include auto-searched media from .storyline/.server_cache so they are readable
