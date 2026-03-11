@@ -93,14 +93,14 @@ class ToolInterceptor:
             meta_collector: NodeManager = context.node_manager
             input_data = defaultdict(list)
 
-            server_cfg = getattr(context, "cfg", None) or getattr(context, "server_cfg", None)
-            inline_base64 = should_inline_media_as_base64(server_cfg)
+            client_cfg = getattr(context, "cfg", None)
+            inline_base64 = should_inline_media_as_base64(client_cfg)
 
             def load_collected_data(collected_node, input_data, store):
                 """Load collected node data"""
                 for collect_kind, artifact_meta in collected_node.items():
                     _, prior_node_output = store.load_result(artifact_meta.artifact_id)
-                    compress_payload_to_base64(prior_node_output['payload'], server_cfg)
+                    compress_payload_to_base64(prior_node_output['payload'], client_cfg)
                     input_data[collect_kind] = prior_node_output['payload']
 
             if node_id == 'load_media':
@@ -108,7 +108,7 @@ class ToolInterceptor:
                 seen_paths: set = set()
                 media_dir = Path(context.media_dir)
                 try:
-                    project_media_root = Path(server_cfg.project.media_dir).resolve()
+                    project_media_root = Path(client_cfg.project.media_dir).resolve()
                 except Exception:
                     project_media_root = None
                 for file_name in os.listdir(media_dir):

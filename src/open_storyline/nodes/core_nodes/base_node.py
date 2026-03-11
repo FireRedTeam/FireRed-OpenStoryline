@@ -206,11 +206,8 @@ class BaseNode(ABC):
                 # List: load base64 data and save to server cache
                 loaded_input[k] = [self._load_item(node_state, user_info, item) for item in payload_input]
             elif isinstance(payload_input, dict):
-                # Dict: if it looks like a file-path payload, load it like an item; otherwise recurse.
-                if self._looks_like_file_path(payload_input.get("path")):
-                    loaded_input[k] = self._load_item(node_state, user_info, payload_input)
-                else:
-                    loaded_input[k] = self.load_inputs_from_client(node_state, payload_input, user_info, save=False)
+                # Dict: recursively process nested data (without saving)
+                loaded_input[k] = self.load_inputs_from_client(node_state, payload_input, user_info, save=False)
             elif isinstance(payload_input, LLMClient):
                 kwargs[k] = payload_input
             else:
@@ -240,11 +237,7 @@ class BaseNode(ABC):
             if isinstance(payload_output, list) and all(isinstance(item, dict) for item in payload_output):
                 packed_output[k] = [self._pack_item(node_state, item) for item in payload_output]
             elif isinstance(payload_output, dict):
-                # Dict: if it looks like a file-path payload, pack it like an item; otherwise recurse.
-                if self._looks_like_file_path(payload_output.get("path")):
-                    packed_output[k] = self._pack_item(node_state, payload_output)
-                else:
-                    packed_output[k] = self.pack_outputs_to_client(node_state, payload_output)
+                packed_output[k] = self.pack_outputs_to_client(node_state, payload_output)
             else:
                 packed_output[k] = outputs[k]
         return packed_output
