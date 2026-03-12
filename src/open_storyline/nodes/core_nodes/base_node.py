@@ -6,6 +6,7 @@ from pydantic import BaseModel, ValidationError
 from typing import Any, Dict, List, Optional, Union, ClassVar
 import json
 import traceback
+import re
 
 from open_storyline.config import Settings
 from open_storyline.nodes.node_state import NodeState
@@ -13,6 +14,7 @@ from open_storyline.nodes.node_state import NodeState
 from open_storyline.storage.file import FileCompressor
 from open_storyline.utils.logging import get_logger
 from open_storyline.mcp.sampling_requester import LLMClient
+from open_storyline.mcp.hooks.node_interceptors import should_inline_media_as_base64
 
 logger = get_logger(__name__)
 
@@ -71,35 +73,119 @@ class BaseNode(ABC):
         }
 
     def _load_item(self, node_state: NodeState, user_info: Dict[str,str], item: Dict[str,Any]):
-        new_item:Dict[str,Any] = {}
+        new_item: Dict[str, Any] = {}
         item_base64 = item.pop("base64", None)
         item_md5 = item.pop("md5", None)
         item_path = item.pop("path", None)
         new_item.update(item)
 
-
         if item_base64 and item_path:
-            item_save_path = self.server_cache_dir / user_info['session_id']/ user_info['artifact_id'] / os.path.basename(item_path)
+            item_save_path = self.server_cache_dir / user_info['session_id'] / user_info['artifact_id'] / os.path.basename(item_path)
             FileCompressor.decompress_from_string(item_base64, item_save_path)
             new_item['path'] = str(item_save_path.relative_to(os.getcwd()))
             new_item['orig_path'] = str(item_path)
             new_item['orig_md5'] = item_md5
+        elif item_path:
+            # Path-only mode (local MCP):
+            # - if item_path is absolute, accept it directly;
+            # - if item_path is relative, resolve it under media_dir and ensure it does not escape that directory.
+            if os.path.isabs(item_path):
+                full_path = Path(item_path)
+            else:
+                media_root = Path(self.server_cfg.project.media_dir).resolve()
+                full_path = (media_root / item_path).resolve()
+                try:
+                    full_path.relative_to(media_root)
+                except ValueError:
+                    raise ValueError(
+                        f"relative path-only input must be under media_dir: {item_path!r}"
+                    )
+            new_item['path'] = str(full_path)
+            new_item['orig_path'] = str(item_path)
+            new_item['orig_md5'] = item_md5
         return new_item
 
-    def _pack_item(self, node_state: NodeState, item: Dict[str,Any]):
+    _FILE_EXT_RE = re.compile(
+        r"\.(mp4|mov|avi|mkv|webm|mp3|wav|m4a|aac|flac|ogg|png|jpg|jpeg|gif|bmp|webp|json)$",
+        re.IGNORECASE,
+    )
+
+    @classmethod
+    def _looks_like_file_path(cls, p: Any) -> bool:
+        if not isinstance(p, str):
+            return False
+        s = p.strip()
+        if not s:
+            return False
+        if "://" in s:
+            return False
+        if cls._FILE_EXT_RE.search(s):
+            return True
+        if "\\" in s or "/" in s:
+            return True
+        if len(s) >= 2 and s[1] == ":":
+            return True
+        return False
+
+    def _pack_item(self, node_state: NodeState, item: Dict[str, Any]):
         orig_path = item.pop('orig_path', None)
         orig_md5 = item.pop('orig_md5', None)
         server_save_path = item.pop('path', None)
-        if server_save_path:
-            compress_data = FileCompressor.compress_and_encode(server_save_path)
-            if orig_path and orig_md5 and compress_data.md5 == orig_md5:
-                node_state.node_summary.debug_for_dev(f"[node] node_id: {self.meta.node_id} change `path` change to {orig_path}")
-                item['path'] = orig_path
-            elif orig_md5 is None or compress_data.md5 != orig_md5:
-                node_state.node_summary.debug_for_dev(f"[node] node_id: {self.meta.node_id} return `base64` to client")
-                item['base64'] = compress_data.base64
-                item['path'] = compress_data.filename
-                item['md5'] = compress_data.md5
+        if not server_save_path:
+            return item
+
+        # Decide response transport policy (path-only vs base64) using the same policy
+        # function as the client side.
+        inline_base64 = should_inline_media_as_base64(self.server_cfg)
+
+        # Prefer a media_dir-relative path for responses when possible, with absolute
+        # path as a fallback.
+        #
+        # Important: in path-only mode, returning a relative `orig_path` that is NOT
+        # under media_dir can break downstream nodes, because the server resolves
+        # relative path-only inputs under project.media_dir. For such cases (e.g. BGM
+        # assets under resource/bgms), fall back to an absolute path.
+        client_path = orig_path or server_save_path
+        try:
+            media_root = Path(self.server_cfg.project.media_dir).resolve()
+        except Exception:
+            media_root = None
+        if media_root is not None:
+            try:
+                client_rel = Path(server_save_path).resolve().relative_to(media_root)
+                client_path = str(client_rel)
+            except Exception:
+                if orig_path and os.path.isabs(str(orig_path)):
+                    client_path = str(orig_path)
+                else:
+                    client_path = str(Path(server_save_path).resolve())
+        else:
+            if orig_path and os.path.isabs(str(orig_path)):
+                client_path = str(orig_path)
+            else:
+                client_path = str(Path(server_save_path).resolve())
+
+        if not inline_base64:
+            node_state.node_summary.debug_for_dev(
+                f"[node] node_id: {self.meta.node_id} return `path` only (local mode)"
+            )
+            item['path'] = client_path
+            return item
+
+        # Remote / base64 mode: keep existing md5-based optimisation when possible.
+        compress_data = FileCompressor.compress_and_encode(server_save_path)
+        if orig_path and orig_md5 and compress_data.md5 == orig_md5:
+            node_state.node_summary.debug_for_dev(
+                f"[node] node_id: {self.meta.node_id} change `path` change to {orig_path}"
+            )
+            item['path'] = orig_path
+        else:
+            node_state.node_summary.debug_for_dev(
+                f"[node] node_id: {self.meta.node_id} return `base64` to client"
+            )
+            item['base64'] = compress_data.base64
+            item['path'] = compress_data.filename
+            item['md5'] = compress_data.md5
         return item
 
 

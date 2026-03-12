@@ -115,6 +115,7 @@ class MCPConfig(ConfigBaseModel):
     connect_host: str = "127.0.0.1"
     port: int = Field(ge=1, le=65535)
     path: str = "/mcp"
+    inline_media: Literal["auto", "always", "never"] = "auto"  # Transport policy: "auto" = infer from connect_host (127.0.0.1/localhost/::1/0.0.0.0 -> path-only); "always" = always use base64; "never" = always use path-only (e.g. Docker / LAN same-machine)
 
     json_response: bool = True
     stateless_http: bool = False

@@ -33,6 +33,7 @@ server_cache_dir = ".storyline/.server_cache"
 server_transport = "streamable-http"  # server 和 host之间的传输方式 / Transport method between server and host
 url_scheme = "http"  
 connect_host = "127.0.0.1" # 不要改动 / Do not change
+inline_media = "auto"      # 传输策略 / Transport policy: auto=根据 connect_host 自动选择 / auto-detect from connect_host; always=总是使用 base64 / always use base64; never=总是只用 path / always use path (e.g. Docker / LAN same-machine)
 port = 8001                # 如果端口冲突，可以随便用一个有空的端口 / Use any available port if conflict occurs
 path = "/mcp"              # 默认值，一般不用改 / Default value, usually unchanged
 
