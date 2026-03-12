@@ -120,14 +120,9 @@ At minimum, fill:
 
 Optional but common:
 
-- `[search_media]` `pexels_api_key`
-- TTS provider keys under `[generate_voiceover.providers.*]`
+- `search_media.pexels_api_key` for searching media
+- TTS provider keys under `generate_voiceover.providers.*` (choose one provider)
 
-After editing config, validate it with:
-
-```bash
-PYTHONPATH=src .venv/bin/python -c "from open_storyline.config import load_settings; s=load_settings('config.toml'); print(s.llm.model, s.vlm.model)"
-```
 
 ## Verification
 
@@ -135,7 +130,6 @@ Run these checks before saying installation is complete:
 
 ```bash
 .venv/bin/pip check
-PYTHONPATH=src .venv/bin/python -c "import agent_fastapi; print('fastapi_app_ok')"
 PYTHONPATH=src .venv/bin/python -c "from open_storyline.config import load_settings; load_settings('config.toml'); print('config_ok')"
 ```
 
@@ -143,7 +137,6 @@ Also confirm key resources exist:
 
 ```bash
 test -f .storyline/models/transnetv2-pytorch-weights.pth
-test -f .storyline/models/all-MiniLM-L6-v2/model.safetensors
 test -d resource/bgms
 ```
 
