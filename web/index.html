@@ -45,9 +45,20 @@
       </div>
 
       <!-- 中间滚动区：长内容放这里 -->
-     <div class="sidebar-scroll" id="sidebarScroll"
+      <div class="sidebar-scroll" id="sidebarScroll"
           aria-label="侧边栏滚动区"
           data-i18n-aria-label="aria.sidebar_scroll">
+        <!-- 会话历史 -->
+        <div id="sessionHistoryPanel" class="sidebar-panel" aria-label="对话历史"
+             data-i18n-aria-label="sidebar.history_aria">
+          <div class="sidebar-panel-title">
+            <span class="sidebar-panel-title-text" data-i18n="sidebar.history_title">对话历史</span>
+          </div>
+          <div id="sessionHistoryList" class="session-history-list">
+            <!-- JS 渲染历史会话 -->
+          </div>
+        </div>
+
       <!-- LLM 配置：卡片包住 下拉框 + 自定义字段 -->
       <div id="llmBox" class="sidebar-panel" aria-label="LLM 配置">
         <div class="sidebar-panel-title">

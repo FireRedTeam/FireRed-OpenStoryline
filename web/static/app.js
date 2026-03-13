@@ -4,6 +4,8 @@ const SIDEBAR_COLLAPSED_KEY = "openstoryline_sidebar_collapsed";
 const DEVBAR_COLLAPSED_KEY = "openstoryline_devbar_collapsed";
 const AUDIO_PREVIEW_MAX = 3;
 const CUSTOM_MODEL_KEY = "__custom__";
+const SESSION_ID_KEY = "openstoryline_session_id";
+const SESSION_LIST_KEY = "openstoryline_session_list_v1";
 
 // =========================================================
 // i18n (zh/en) + lang persistence
@@ -41,6 +43,9 @@ const __OS_I18N = {
     // sidebar
     "sidebar.toggle": "收起/展开侧边栏",
     "sidebar.new_chat": "创建新对话",
+    "sidebar.history_title": "对话历史",
+    "sidebar.history_empty": "暂无历史会话",
+    "sidebar.history_aria": "历史会话列表",
     "sidebar.model_label": "对话模型",
     "sidebar.model_select_aria": "选择对话模型",
     "sidebar.custom_model_box_aria": "自定义模型配置",
@@ -98,6 +103,7 @@ const __OS_I18N = {
     "toast.upload_failed": "上传失败：{msg}",
     "toast.delete_failed": "删除失败：{msg}",
     "toast.uploading_cannot_send": "素材正在上传中，上传完成后才能发送。",
+    "toast.switch_while_streaming": "正在生成回复，暂时无法切换会话。请先等待完成或打断当前回复。",
     "toast.uploading_interrupt_send": "素材正在上传中，暂时无法发送新消息。已为你打断当前回复；上传完成后再按 Enter 发送。",
 
     // tools
@@ -148,6 +154,9 @@ const __OS_I18N = {
     // sidebar
     "sidebar.toggle": "Collapse/expand sidebar",
     "sidebar.new_chat": "New chat",
+    "sidebar.history_title": "History",
+    "sidebar.history_empty": "No past chats yet",
+    "sidebar.history_aria": "Chat history list",
     "sidebar.model_label": "Chat model",
     "sidebar.model_select_aria": "Select chat model",
     "sidebar.custom_model_box_aria": "Custom model settings",
@@ -205,6 +214,7 @@ const __OS_I18N = {
     "toast.upload_failed": "Upload failed: {msg}",
     "toast.delete_failed": "Delete failed: {msg}",
     "toast.uploading_cannot_send": "Media is uploading. Please wait until it finishes before sending.",
+    "toast.switch_while_streaming": "A reply is still being generated. Please wait or interrupt before switching chats.",
     "toast.uploading_interrupt_send": "Media is uploading, so a new message can't be sent yet. I interrupted the current reply; press Enter after the upload finishes.",
     
     // tools
@@ -2307,6 +2317,7 @@ class App {
     this.ws = null;
 
     this.sessionId = null;
+    this.sessionHistory = [];
     this.pendingMedia = [];
 
     this.llmSelect = $("#llmModelSelect");
@@ -2360,6 +2371,7 @@ class App {
     this.createDialogBtn = $("#createDialogBtn");
     this.devbarToggleBtn = $("#devbarToggle");
     this.devbarEl = $("#devbar");
+    this.sessionHistoryListEl = $("#sessionHistoryList");
 
     this.canceling = false;
 
@@ -2376,11 +2388,48 @@ class App {
     this.streaming = false;
     this.uploading = false;
 
+    // 防止 “发送后到 assistant.start 前” 的短暂切换窗口
+    this._switchLockUntilAssistantStart = false;
+    this._switchLockTimer = 0;
+
     this.langToggle = $("#langToggle");
     this.lang = __osNormLang(window.OPENSTORYLINE_LANG || "zh");
 
     this._langWasStored = (__osLoadLang() != null);
 
+  }
+
+  _showSwitchWhileStreamingToast() {
+    if (!this.ui || !this.ui.showToastI18n) return;
+    this.ui.showToastI18n("toast.switch_while_streaming", {});
+    setTimeout(() => this.ui.hideToast(), 1800);
+  }
+
+  _isSwitchBlocked() {
+    return !!this.streaming || !!this._switchLockUntilAssistantStart;
+  }
+
+  _setSwitchLock() {
+    this._switchLockUntilAssistantStart = true;
+    if (this._switchLockTimer) {
+      try { clearTimeout(this._switchLockTimer); } catch {}
+      this._switchLockTimer = 0;
+    }
+
+    // 极端情况下（网络抖动/WS 事件丢失）assistant.start 可能迟迟不到：
+    // 给一个超时自动释放，避免“永久无法切换会话”。
+    this._switchLockTimer = setTimeout(() => {
+      this._switchLockTimer = 0;
+      this._switchLockUntilAssistantStart = false;
+    }, 25000);
+  }
+
+  _clearSwitchLock() {
+    this._switchLockUntilAssistantStart = false;
+    if (this._switchLockTimer) {
+      try { clearTimeout(this._switchLockTimer); } catch {}
+      this._switchLockTimer = 0;
+    }
   }
 
   wsUrl(sessionId) {
@@ -2396,15 +2445,21 @@ class App {
     this._setLang(this.lang, { persist: false, syncServer: false });
     await this.loadTtsUiSchema();
 
-    // 复用 localStorage session；如果失效就创建新 session
-    const saved = localStorage.getItem("openstoryline_session_id");
+    // 先加载本地会话列表
+    this.sessionHistory = this._loadSessionHistory();
+    this._renderSessionHistory();
+
+    // 复用 localStorage 当前会话；如果失效就创建新 session
+    const saved = localStorage.getItem(SESSION_ID_KEY);
     if (saved) {
       try {
         const snap = await this.api.getSession(saved);
         await this.useSession(saved, snap);
         return;
       } catch {
-        localStorage.removeItem("openstoryline_session_id");
+        localStorage.removeItem(SESSION_ID_KEY);
+        this._removeSessionFromHistory(saved);
+        this._renderSessionHistory();
       }
     }
 
@@ -2807,6 +2862,308 @@ class App {
     return { mode, api_key };
   }
 
+  // ----- Session history (localStorage, per-browser) -----
+
+  _loadSessionHistory() {
+    try {
+      const raw = localStorage.getItem(SESSION_LIST_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+
+      const out = [];
+      for (const item of parsed) {
+        if (!item || typeof item !== "object") continue;
+        const id = String(item.id || "").trim();
+        if (!id) continue;
+        const title = String(item.title || "").trim();
+        const created_at = Number(item.created_at || Date.now());
+        const updated_at = Number(item.updated_at || created_at);
+        const last_preview = String(item.last_preview || "").trim();
+        const has_user = !!item.has_user;
+        out.push({ id, title, created_at, updated_at, last_preview, has_user });
+      }
+      return out;
+    } catch {
+      return [];
+    }
+  }
+
+  _saveSessionHistory(list) {
+    if (!Array.isArray(list)) return;
+    try {
+      // 限制列表长度，避免无限增长；不改变原有顺序
+      const trimmed = list.slice(0, 50);
+      localStorage.setItem(SESSION_LIST_KEY, JSON.stringify(trimmed));
+    } catch {
+      // 忽略存储错误（Safari 无痕等）
+    }
+  }
+
+  _newChatTitle() {
+    const lang = __osNormLang(this.lang || "zh");
+    return (lang === "en") ? "New chat" : "新对话";
+  }
+
+  _isNewChatTitle(title) {
+    const t = String(title || "").trim();
+    if (!t) return true;
+    return t === "新对话" || t === "New chat";
+  }
+
+  _deriveSessionTitle(snapshot, fallbackId) {
+    const history = (snapshot && Array.isArray(snapshot.history)) ? snapshot.history : [];
+    const firstUser = history.find((h) => h && h.role === "user" && typeof h.content === "string");
+    let title = firstUser ? String(firstUser.content || "") : "";
+    title = title.replace(/\s+/g, " ").trim();
+    if (title) {
+      if (title.length > 32) title = title.slice(0, 32) + "…";
+      return title;
+    }
+    // 还没输入任何内容：显示“新对话”
+    return this._newChatTitle();
+  }
+
+  _deriveSessionPreview(snapshot) {
+    const history = (snapshot && Array.isArray(snapshot.history)) ? snapshot.history : [];
+    // 优先最后一条用户消息，其次助手
+    let last = null;
+    for (let i = history.length - 1; i >= 0; i--) {
+      const it = history[i];
+      if (!it || typeof it !== "object") continue;
+      if (!last && (it.role === "assistant" || it.role === "user") && typeof it.content === "string") {
+        last = it;
+      }
+      if (it.role === "user" && typeof it.content === "string") {
+        last = it;
+        break;
+      }
+    }
+    if (!last || typeof last.content !== "string") return "";
+    let text = String(last.content || "").replace(/\s+/g, " ").trim();
+    if (!text) return "";
+    if (text.length > 40) text = text.slice(0, 40) + "…";
+    return text;
+  }
+
+  _snapshotHasUserMessage(snapshot) {
+    const history = (snapshot && Array.isArray(snapshot.history)) ? snapshot.history : [];
+    return history.some((h) => h && h.role === "user" && typeof h.content === "string" && String(h.content || "").trim());
+  }
+
+  _upsertSessionHistoryFromSnapshot(sessionId, snapshot) {
+    const sid = String(sessionId || "").trim();
+    if (!sid) return;
+    if (!Array.isArray(this.sessionHistory)) this.sessionHistory = [];
+
+    const now = Date.now();
+    const title = this._deriveSessionTitle(snapshot, sid);
+    const preview = this._deriveSessionPreview(snapshot);
+    const hasUser = this._snapshotHasUserMessage(snapshot);
+
+    let found = false;
+    const next = this.sessionHistory.map((item) => {
+      if (item.id !== sid) return item;
+      found = true;
+      return {
+        ...item,
+        title: title || item.title || "",
+        last_preview: preview || item.last_preview || "",
+        // updated_at 仅作元信息保存，不参与排序；更新不会影响列表顺序
+        updated_at: now,
+        has_user: (item.has_user || false) || hasUser,
+      };
+    });
+
+    if (!found) {
+      next.push({
+        id: sid,
+        title,
+        created_at: now,
+        updated_at: now,
+        last_preview: preview,
+        has_user: hasUser,
+      });
+    }
+
+    this.sessionHistory = next;
+    this._saveSessionHistory(this.sessionHistory);
+  }
+
+  _removeSessionFromHistory(sessionId) {
+    const sid = String(sessionId || "").trim();
+    if (!sid || !Array.isArray(this.sessionHistory)) return;
+    const next = this.sessionHistory.filter((item) => item.id !== sid);
+    if (next.length === this.sessionHistory.length) return;
+    this.sessionHistory = next;
+    this._saveSessionHistory(this.sessionHistory);
+  }
+
+  _renderSessionHistory(activeId) {
+    const host = this.sessionHistoryListEl || $("#sessionHistoryList");
+    if (!host) return;
+
+    host.innerHTML = "";
+
+    const list = Array.isArray(this.sessionHistory) ? this.sessionHistory.slice() : [];
+    if (!list.length) {
+      const empty = document.createElement("div");
+      empty.className = "session-history-empty";
+      empty.textContent = __t("sidebar.history_empty");
+      host.appendChild(empty);
+      return;
+    }
+
+    // 始终按创建时间倒序展示，点击切换会话不会改变顺序
+    list.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+
+    for (const item of list) {
+      if (!item || !item.id) continue;
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "session-history-item";
+      btn.dataset.sessionId = String(item.id);
+      if (activeId && String(activeId) === String(item.id)) {
+        btn.classList.add("is-active");
+      }
+
+      const titleEl = document.createElement("div");
+      titleEl.className = "session-history-title";
+      titleEl.textContent = item.title || this._newChatTitle();
+      btn.appendChild(titleEl);
+
+      if (item.last_preview) {
+        const metaEl = document.createElement("div");
+        metaEl.className = "session-history-meta";
+        metaEl.textContent = item.last_preview;
+        btn.appendChild(metaEl);
+      }
+
+      host.appendChild(btn);
+    }
+  }
+
+  _getSessionHistoryItem(sessionId) {
+    const sid = String(sessionId || "").trim();
+    if (!sid || !Array.isArray(this.sessionHistory)) return null;
+    return this.sessionHistory.find((x) => x && x.id === sid) || null;
+  }
+
+  _isCurrentSessionBlank() {
+    if (!this.sessionId) return false;
+    const item = this._getSessionHistoryItem(this.sessionId);
+    const hasUser = !!(item && item.has_user);
+    // “新对话/草稿会话”的判定：只看是否出现过用户消息。
+    // 说明：上传了素材但还没发送第一条消息时，仍然应该被视为同一个“新对话”，避免无限创建多个新会话。
+    return !hasUser;
+  }
+
+  _findAnyBlankSessionId() {
+    if (!Array.isArray(this.sessionHistory) || !this.sessionHistory.length) return null;
+    // 复用“最新的空会话”，保证“全局只保留一个新对话”的交互更符合直觉
+    const blanks = this.sessionHistory
+      .filter((it) => it && !it.has_user && it.id)
+      .slice()
+      .sort((a, b) => (Number(b.created_at) || 0) - (Number(a.created_at) || 0));
+    return blanks.length ? String(blanks[0].id || "") : null;
+  }
+
+  _touchBlankSessionAsNewChat(sessionId) {
+    const sid = String(sessionId || "").trim();
+    if (!sid) return;
+    const now = Date.now();
+    const next = (Array.isArray(this.sessionHistory) ? this.sessionHistory : []).map((it) => {
+      if (!it || it.id !== sid) return it;
+      return {
+        ...it,
+        title: this._newChatTitle(),
+        last_preview: "",
+        has_user: false,
+        created_at: now,  // 视为“新对话”，刷新创建时间使其成为最新
+        updated_at: now,
+      };
+    });
+    this.sessionHistory = next;
+    this._saveSessionHistory(this.sessionHistory);
+    this._renderSessionHistory(this.sessionId);
+  }
+
+  _handleMissingSessionOnClick(sessionId) {
+    // 遇到错误时，直接从本地列表移除，并用 toast 提示
+    const sid = String(sessionId || "").trim();
+    if (!sid) return;
+
+    this._removeSessionFromHistory(sid);
+    this._renderSessionHistory(this.sessionId);
+
+    const lang = __osNormLang(this.lang || "zh");
+    const msg = (lang === "en")
+      ? "This chat has expired or is no longer available and has been removed from history."
+      : "该会话已失效或不可用，已从历史列表中移除。";
+    if (this.ui && typeof this.ui.showToast === "function") {
+      this.ui.showToast(msg);
+      setTimeout(() => this.ui.hideToast(), 2000);
+    }
+  }
+
+  _markSessionHasUserNow(userText) {
+    const sid = String(this.sessionId || "").trim();
+    if (!sid) return;
+
+    const text = String(userText || "").replace(/\s+/g, " ").trim();
+    const preview = text ? (text.length > 40 ? text.slice(0, 40) + "…" : text) : "";
+    const now = Date.now();
+
+    if (!Array.isArray(this.sessionHistory)) this.sessionHistory = [];
+
+    let found = false;
+    const next = this.sessionHistory.map((it) => {
+      if (!it || it.id !== sid) return it;
+      found = true;
+      const nextTitle = (this._isNewChatTitle(it.title) || !String(it.title || "").trim())
+        ? (text.length > 32 ? text.slice(0, 32) + "…" : (text || this._newChatTitle()))
+        : it.title;
+
+      return {
+        ...it,
+        title: nextTitle,
+        last_preview: preview || it.last_preview || "",
+        has_user: true,
+        updated_at: now,
+      };
+    });
+
+    if (!found) {
+      next.push({
+        id: sid,
+        title: text ? (text.length > 32 ? text.slice(0, 32) + "…" : text) : this._newChatTitle(),
+        created_at: now,
+        updated_at: now,
+        last_preview: preview,
+        has_user: true,
+      });
+    }
+
+    this.sessionHistory = next;
+    this._saveSessionHistory(this.sessionHistory);
+    this._renderSessionHistory(this.sessionId);
+  }
+
+  _flashSessionHistoryItem(sessionId) {
+    const sid = String(sessionId || "").trim();
+    if (!sid) return;
+    const host = this.sessionHistoryListEl || $("#sessionHistoryList");
+    if (!host) return;
+
+    const el = host.querySelector(`[data-session-id="${sid}"]`);
+    if (!el) return;
+
+    el.classList.add("flash");
+    setTimeout(() => {
+      el.classList.remove("flash");
+    }, 160);
+  }
+
 
   _makeChatSendPayload(text, attachment_ids) {
     const payload = { text, attachment_ids, lang: this.lang || "zh" };
@@ -2961,7 +3318,39 @@ class App {
       this.sidebarToggleBtn.addEventListener("click", () => this.toggleSidebar());
     }
     if (this.createDialogBtn) {
-      this.createDialogBtn.addEventListener("click", () => this.newSession());
+      this.createDialogBtn.addEventListener("click", () => {
+        if (this._isSwitchBlocked()) {
+          this._showSwitchWhileStreamingToast();
+          return;
+        }
+        this.newSession();
+      });
+    }
+
+    if (this.sessionHistoryListEl && !this._sessionHistoryBound) {
+      this._sessionHistoryBound = true;
+      this.sessionHistoryListEl.addEventListener("click", async (e) => {
+        const target = e.target.closest("[data-session-id]");
+        if (!target) return;
+
+         // 正在生成回复时禁止切换会话，避免未完成内容丢失
+        if (this._isSwitchBlocked()) {
+          this._showSwitchWhileStreamingToast();
+          return;
+        }
+
+        const sid = String(target.dataset.sessionId || "").trim();
+        if (!sid || sid === this.sessionId) return;
+
+        try {
+          const snap = await this.api.getSession(sid);
+          await this.useSession(sid, snap);
+        } catch (err) {
+          console.warn("[session] failed to restore session", sid, err);
+          // 会话可能已经在后端失效：提示并允许清理本地记录
+          this._handleMissingSessionOnClick(sid);
+        }
+      });
     }
 
     if (this.llmSelect) {
@@ -3151,6 +3540,29 @@ class App {
   }
 
   async newSession() {
+    // 如果当前会话仍为空（未输入任何内容），再次点击“创建新对话”不新建 session：
+    // - 保持在当前界面
+    // - 仅刷新时间（让它被视为最新的新对话）
+    if (this._isCurrentSessionBlank()) {
+      this._touchBlankSessionAsNewChat(this.sessionId);
+      this._flashSessionHistoryItem(this.sessionId);
+      return;
+    }
+
+    // 当前不是“新对话”：如果历史中已经存在一个空会话，则直接切换过去，而不是创建第二个“新对话”
+    const blankId = this._findAnyBlankSessionId();
+    if (blankId && blankId !== this.sessionId) {
+      try {
+        const snap = await this.api.getSession(blankId);
+        await this.useSession(blankId, snap);
+        return;
+      } catch (e) {
+        console.warn("[session] failed to reuse blank session, will create new one:", e);
+        this._removeSessionFromHistory(blankId);
+        this._renderSessionHistory(this.sessionId);
+      }
+    }
+
     const snap = await this.api.createSession();
     await this.useSession(snap.session_id, snap);
   }
@@ -3176,7 +3588,11 @@ class App {
     this.applySnapshotLimits(snapshot);
     this.applySnapshotModels(snapshot);
 
-    localStorage.setItem("openstoryline_session_id", sessionId);
+    localStorage.setItem(SESSION_ID_KEY, sessionId);
+
+    // 会话列表：更新/插入并重新渲染
+    this._upsertSessionHistoryFromSnapshot(sessionId, snapshot);
+    this._renderSessionHistory(sessionId);
 
     this.setDeveloperMode(!!snapshot.developer_mode);
 
@@ -3215,6 +3631,9 @@ class App {
 
     this.setPending(snapshot.pending_media || []);
     this.connectWs();
+
+    // 切换到会话时，让对应历史项轻微闪烁，增强反馈
+    this._flashSessionHistoryItem(sessionId);
   }
 
   connectWs() {
@@ -3253,8 +3672,12 @@ class App {
     }
 
     if (type === "assistant.start") {
+      // 请求已开始流式：解除“发送后短暂锁”
+      this._clearSwitchLock();
       this.streaming = true;
       this._updateComposerDisabledState();
+      // 如果之前有 placeholder（rawText 为空），先清掉避免残留
+      try { this.ui.flushAssistantSegment(); } catch {}
       this.ui.startAssistantMessage({placeholder: true});
       return;
     }
@@ -3270,6 +3693,7 @@ class App {
     }
 
     if (type === "assistant.end") {
+      this._clearSwitchLock();
       this.streaming = false;
       this.canceling = false;
       this._updateComposerDisabledState();
@@ -3317,6 +3741,7 @@ class App {
     }
 
     if (type === "chat.cleared") {
+      this._clearSwitchLock();
       this.streaming = false;
       this.canceling = false;
       this._updateComposerDisabledState();
@@ -3325,6 +3750,7 @@ class App {
     }
 
     if (type === "error") {
+      this._clearSwitchLock();
       this.streaming = false;
       this.canceling = false;
       this._updateComposerDisabledState();
@@ -3374,6 +3800,9 @@ class App {
         this.ui.appendUserMessage(text, attachments);
         this.setPending([]);
 
+        // 本地先把会话标记为“已输入”，避免历史里一直显示“新对话”
+        this._markSessionHasUserNow(text);
+
         // 2) 清空输入框
         this.promptInput.value = "";
         this._autosizePrompt();
@@ -3415,6 +3844,9 @@ class App {
     this.ui.appendUserMessage(text, attachments);
     this.setPending([]);
 
+    // 本地先把会话标记为“已输入”，避免历史里一直显示“新对话”
+    this._markSessionHasUserNow(text);
+
     this.promptInput.value = "";
     this._autosizePrompt();
 
@@ -3424,6 +3856,9 @@ class App {
       setTimeout(() => this.ui.hideToast(), 1800);
       return;
     }
+
+    // 发送后到 assistant.start 之间加锁，禁止切会话（不插入任何硬编码占位气泡）
+    this._setSwitchLock();
     this.ws.send("chat.send", built.payload);
   }
 
