@@ -99,6 +99,8 @@ const __OS_I18N = {
     "toast.delete_failed": "删除失败：{msg}",
     "toast.uploading_cannot_send": "素材正在上传中，上传完成后才能发送。",
     "toast.uploading_interrupt_send": "素材正在上传中，暂时无法发送新消息。已为你打断当前回复；上传完成后再按 Enter 发送。",
+    "toast.media_all_filtered": "仅支持上传视频、图片或音频等媒体文件。",
+    "toast.media_partial_filtered": "已过滤 {n} 个不支持的文件类型，仅上传媒体文件。",
 
     // tools
     "tool.card.default_name": "工具调用",
@@ -206,6 +208,8 @@ const __OS_I18N = {
     "toast.delete_failed": "Delete failed: {msg}",
     "toast.uploading_cannot_send": "Media is uploading. Please wait until it finishes before sending.",
     "toast.uploading_interrupt_send": "Media is uploading, so a new message can't be sent yet. I interrupted the current reply; press Enter after the upload finishes.",
+    "toast.media_all_filtered": "Only video, image or audio media files are supported.",
+    "toast.media_partial_filtered": "{n} unsupported file(s) were filtered; only media files will be uploaded.",
     
     // tools
     "tool.card.default_name": "Tool call",
@@ -2993,83 +2997,81 @@ class App {
       this.devbarToggleBtn.addEventListener("click", () => this.toggleDevbar());
     }
 
-    // uploader
-    this.uploadBtn.addEventListener("click", () => this.fileInput.click());
+    // uploader（按钮选择 + 拖拽上传）
+    if (this.uploadBtn && this.fileInput) {
+      this.uploadBtn.addEventListener("click", () => this.fileInput.click());
 
-    this.fileInput.addEventListener("change", async () => {
-      let files = Array.from(this.fileInput.files || []);
-      this.fileInput.value = "";
-      if (!files.length) return;
+      this.fileInput.addEventListener("change", async () => {
+        const files = Array.from(this.fileInput.files || []);
+        this.fileInput.value = "";
+        if (!files.length) return;
+        await this._handleFilesSelected(files);
+      });
+    }
 
-      // 会话内 pending 上限
-      const maxPending = Number(this.limits.max_pending_media_per_session || 30);
-      const remain = Math.max(0, maxPending - (this.pendingMedia.length || 0));
-      if (remain <= 0) {
-        this.ui.showToastI18n("toast.pending_limit", { max: maxPending });
-        setTimeout(() => this.ui.hideToast(), 1600);
-        return;
-      }
-      if (files.length > remain) {
-        this.ui.showToastI18n("toast.pending_limit_partial", { remain, max: maxPending });
-        setTimeout(() => this.ui.hideToast(), 1400);
-        files = files.slice(0, remain);
-      }
+    // 拖拽上传：允许用户把文件拖到整个页面
+    // 仅对“文件拖拽”拦截，避免影响文本拖动等其他行为
+    const rootEl = document.body || document.documentElement;
+    const composerEl = document.querySelector(".composer");
+    if (rootEl) {
+      let dragDepth = 0;
 
-      const totalBytes = Math.max(1, files.reduce((s, f) => s + (f.size || 0), 0));
-      let confirmedBytesAll = 0;
-
-      this.uploading = true;
-      this._updateComposerDisabledState();
-
-      try {
-        this.ui.showToastI18n("toast.uploading", { pct: 0 });
-
-        // 分片
-        for (let i = 0; i < files.length; i++) {
-          const f = files[i];
-
-          // 预先创建 ObjectURL（用于 (3) 预览走本地缓存）
-          const localUrl = URL.createObjectURL(f);
-
-          try {
-            const resp = await this.api.uploadMediaChunked(this.sessionId, f, {
-              chunkSize: this.limits.upload_chunk_bytes,
-              onProgress: (loadedInFile, fileTotal) => {
-                const overallLoaded = Math.min(totalBytes, confirmedBytesAll + (loadedInFile || 0));
-                const pct = Math.round((overallLoaded / totalBytes) * 100);
-                this.ui.showToastI18n("toast.uploading_file", { i: i + 1, n: files.length, name: f.name, pct });
-              },
-            });
-
-            // 上传完成：把 media_id -> localUrl 绑定起来
-            if (resp && resp.media && resp.media.id) {
-              this.localObjectUrlByMediaId.set(resp.media.id, localUrl);
-            } else {
-              // 理论不应发生；发生就释放
-              try { URL.revokeObjectURL(localUrl); } catch {}
-            }
-
-            confirmedBytesAll += (f.size || 0);
-
-            // pending 更新（绑定 local_url 后再渲染）
-            this.setPending((resp && resp.pending_media) ? resp.pending_media : []);
-          } catch (e) {
-            // 本文件失败：释放 URL，避免泄漏
-            try { URL.revokeObjectURL(localUrl); } catch {}
-            throw e;
-          }
+      const isFileDrag = (e) => {
+        const dt = e && e.dataTransfer;
+        if (!dt || !dt.types) return false;
+        try {
+          return Array.from(dt.types).includes("Files");
+        } catch {
+          return false;
         }
+      };
 
-        this.ui.hideToast();
-      } catch (e) {
-        this.ui.hideToast();
-        this.ui.showToastI18n("toast.upload_failed", { msg: (e && (e.message || e)) || "" });
-        setTimeout(() => this.ui.hideToast(), 1800);
-      } finally {
-        this.uploading = false;
-        this._updateComposerDisabledState();
-      }
-    });
+      const addDragOverClass = () => {
+        if (composerEl) composerEl.classList.add("composer-dragover");
+      };
+      const clearDragOverClass = () => {
+        dragDepth = 0;
+        if (composerEl) composerEl.classList.remove("composer-dragover");
+      };
+
+      rootEl.addEventListener("dragenter", (e) => {
+        if (!isFileDrag(e)) return;
+        try { e.preventDefault(); } catch {}
+        dragDepth += 1;
+        addDragOverClass();
+      });
+
+      rootEl.addEventListener("dragover", (e) => {
+        if (!isFileDrag(e)) return;
+        try {
+          e.preventDefault();
+          if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+        } catch {}
+        addDragOverClass();
+      });
+
+      rootEl.addEventListener("dragleave", (e) => {
+        if (!isFileDrag(e)) return;
+        try { e.preventDefault(); } catch {}
+        dragDepth = Math.max(0, dragDepth - 1);
+        if (dragDepth === 0) {
+          clearDragOverClass();
+        }
+      });
+
+      rootEl.addEventListener("drop", async (e) => {
+        if (!isFileDrag(e)) return;
+        try { e.preventDefault(); } catch {}
+        clearDragOverClass();
+
+        const dt = e.dataTransfer;
+        if (!dt) return;
+        const files = Array.from(dt.files || []);
+        if (!files.length) return;
+
+        await this._handleFilesSelected(files);
+      });
+    }
 
 
     // pending 删除：用事件委托
@@ -3141,6 +3143,120 @@ class App {
         const next = this.langToggle.checked ? "en" : "zh";
         this._setLang(next, { persist: true, syncServer: true });
       });
+    }
+  }
+
+  async _handleFilesSelected(rawFiles) {
+    let files = Array.isArray(rawFiles) ? rawFiles.slice() : Array.from(rawFiles || []);
+    if (!files.length) return;
+
+    // 仅允许常见媒体类型（视频 / 图片 / 音频）
+    const isMediaFile = (f) => {
+      if (!f) return false;
+      const type = String(f.type || "").toLowerCase();
+      if (type.startsWith("video/") || type.startsWith("image/") || type.startsWith("audio/")) {
+        return true;
+      }
+      // 对部分没有正确 MIME 的文件，fallback 到后缀判断
+      const name = String(f.name || "").toLowerCase();
+      return /\.(mp4|mov|m4v|avi|mkv|webm|mp3|wav|flac|aac|ogg|m4a|flv|wmv|jpg|jpeg|png|gif|webp|bmp|tiff)$/.test(name);
+    };
+
+    const beforeCount = files.length;
+    files = files.filter(isMediaFile);
+    const filteredCount = beforeCount - files.length;
+
+    if (!files.length) {
+      // 全部被过滤，直接提示并返回
+      try {
+        this.ui.showToastI18n("toast.media_all_filtered", {});
+        setTimeout(() => this.ui.hideToast(), 1800);
+      } catch {}
+      return;
+    }
+    if (filteredCount > 0) {
+      try {
+        this.ui.showToastI18n("toast.media_partial_filtered", { n: filteredCount });
+        setTimeout(() => this.ui.hideToast(), 1800);
+      } catch {}
+    }
+
+    // 已在上传中时，避免并发上传导致状态错乱
+    if (this.uploading) {
+      try {
+        this.ui.showToastI18n("toast.uploading_cannot_send", {});
+        setTimeout(() => this.ui.hideToast(), 1600);
+      } catch {}
+      return;
+    }
+
+    // 会话内 pending 上限
+    const maxPending = Number(this.limits.max_pending_media_per_session || 30);
+    const remain = Math.max(0, maxPending - (this.pendingMedia.length || 0));
+    if (remain <= 0) {
+      this.ui.showToastI18n("toast.pending_limit", { max: maxPending });
+      setTimeout(() => this.ui.hideToast(), 1600);
+      return;
+    }
+    if (files.length > remain) {
+      this.ui.showToastI18n("toast.pending_limit_partial", { remain, max: maxPending });
+      setTimeout(() => this.ui.hideToast(), 1400);
+      files = files.slice(0, remain);
+    }
+
+    const totalBytes = Math.max(1, files.reduce((s, f) => s + (f.size || 0), 0));
+    let confirmedBytesAll = 0;
+
+    this.uploading = true;
+    this._updateComposerDisabledState();
+
+    try {
+      this.ui.showToastI18n("toast.uploading", { pct: 0 });
+
+      // 分片
+      for (let i = 0; i < files.length; i++) {
+        const f = files[i];
+
+        // 预先创建 ObjectURL（用于 (3) 预览走本地缓存）
+        const localUrl = URL.createObjectURL(f);
+
+        try {
+          const resp = await this.api.uploadMediaChunked(this.sessionId, f, {
+            chunkSize: this.limits.upload_chunk_bytes,
+            onProgress: (loadedInFile, fileTotal) => {
+              const overallLoaded = Math.min(totalBytes, confirmedBytesAll + (loadedInFile || 0));
+              const pct = Math.round((overallLoaded / totalBytes) * 100);
+              this.ui.showToastI18n("toast.uploading_file", { i: i + 1, n: files.length, name: f.name, pct });
+            },
+          });
+
+          // 上传完成：把 media_id -> localUrl 绑定起来
+          if (resp && resp.media && resp.media.id) {
+            this.localObjectUrlByMediaId.set(resp.media.id, localUrl);
+          } else {
+            // 理论不应发生；发生就释放
+            try { URL.revokeObjectURL(localUrl); } catch {}
+          }
+
+          confirmedBytesAll += (f.size || 0);
+
+          // pending 更新（绑定 local_url 后再渲染）
+          this.setPending((resp && resp.pending_media) ? resp.pending_media : []);
+        } catch (e) {
+          // 本文件失败：释放 URL，避免泄漏
+          try { URL.revokeObjectURL(localUrl); } catch {}
+          throw e;
+        }
+      }
+
+      this.ui.hideToast();
+    } catch (e) {
+      this.ui.hideToast();
+      this.ui.showToastI18n("toast.upload_failed", { msg: (e && (e.message || e)) || "" });
+      setTimeout(() => this.ui.hideToast(), 1800);
+    } finally {
+      this.uploading = false;
+      this._updateComposerDisabledState();
     }
   }
 
