@@ -936,6 +936,12 @@ body.sidebar-collapsed .sidebar-scroll{
   box-shadow: var(--shadow-soft), var(--ring);
 }
 
+/* 拖拽上传高亮态 */
+.composer.composer-dragover{
+  border-color: var(--border);
+  box-shadow: var(--shadow-soft), var(--ring);
+}
+
 /* 待发送素材：内嵌在输入框里 */
 .pending{
   display:flex;
