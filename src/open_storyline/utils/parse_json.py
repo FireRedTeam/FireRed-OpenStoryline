@@ -1,6 +1,6 @@
 import json
 import re
-from typing import Any, Dict, Optional, Iterable
+from typing import Any, Dict, Optional, Iterable, List
 
 def try_parse_tool_call(text:str) -> Optional[Dict[str, Any]]:
     """
@@ -141,6 +141,47 @@ def _iter_object_candidates(text: str) -> Iterable[str]:
             cand = _extract_balanced_object(text, idx)
             if cand:
                 yield cand
+
+def parse_json_list(text: str) -> List[Any]:
+    """
+    Parse a JSON array (list) from arbitrary text.
+
+    Supports:
+      1) Markdown fenced JSON code blocks: ```json ... ```
+      2) JSON surrounded by extra text
+      3) Removing trailing commas before '}' or ']' 
+    Args:
+        text: Input string to parse
+    Returns:
+        Parsed list
+    Raises:
+        ValueError: Cannot find a valid JSON array to parse
+        TypeError: Input text is not a string
+    """
+    if not isinstance(text, str):
+        raise TypeError(f"text must be str, got {type(text).__name__}")
+
+    # Try fenced block first, then try the entire text
+    search_spaces = list(_iter_fenced_json_blocks(text))
+    search_spaces.append(text)
+
+    last_err: Optional[Exception] = None
+
+    for space in search_spaces:
+        stripped = space.lstrip().lstrip("\ufeff")  # 顺便去 BOM
+        if not stripped.startswith("["):
+            continue
+
+        cleaned = _strip_trailing_commas(stripped).strip()
+        try:
+            obj = json.loads(cleaned)
+            if isinstance(obj, list):
+                return obj
+        except Exception as e:
+            last_err = e
+            continue
+
+    raise ValueError("No valid JSON array (list) found in input") from last_err
 
 
 def parse_json_dict(text: str) -> Dict[str, Any]:

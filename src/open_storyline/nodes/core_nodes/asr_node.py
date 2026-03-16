@@ -93,6 +93,7 @@ class LocalASRNode(BaseNode):
             if kind != "video":
                 asr_infos.append({
                     "clip_id": clip["clip_id"],
+                    "path": video_path,
                     "kind": kind,
                     "asr_res": {},
                 })
@@ -105,6 +106,7 @@ class LocalASRNode(BaseNode):
                 if audio_wav is None:
                     asr_infos.append({
                         "clip_id": clip["clip_id"],
+                        "path": video_path,
                         "kind": kind,
                         "asr_res": {},
                     })
@@ -120,6 +122,7 @@ class LocalASRNode(BaseNode):
                 )
                 asr_infos.append({
                     "clip_id": clip["clip_id"],
+                    "path": video_path,
                     "kind": kind,
                     "asr_res": res[0] if res else {},
                 })
