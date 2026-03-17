@@ -980,13 +980,13 @@ class MediaStore:
         try:
             os.replace(src_path, save_path)
         except OSError as e:
-            logger.exception("Failed to save uploaded media file")
+            logger.exception("Failed to finalize resumable media file")
             if e.errno == errno.ENOSPC:
                 detail = "Failed to save media: disk full"
             elif e.errno in (errno.EACCES, errno.EPERM):
                 detail = "Failed to save media: permission denied"
             else:
-                detail = f"Failed to save media file: {e}"
+                detail = f"Failed to save media file"
             raise HTTPException(status_code=500, detail=detail)
 
         thumb_path: Optional[str] = None
