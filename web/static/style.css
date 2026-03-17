@@ -529,15 +529,9 @@ body.sidebar-collapsed .sidebar-model{ display: none; }
 }
 
 @keyframes session-history-flash{
-  0%{
-    background: var(--surface-2);
-  }
-  50%{
-    background: rgba(255,255,255,0.18);
-  }
-  100%{
-    background: var(--surface-2);
-  }
+  0%{ background: var(--surface-2); }
+  50%{ background: rgba(255,255,255,0.18); }
+  100%{ background: var(--surface-2); }
 }
 
 .session-history-item.flash{
