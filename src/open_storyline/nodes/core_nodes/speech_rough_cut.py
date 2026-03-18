@@ -63,29 +63,35 @@ class SpeechRoughCutNode(BaseNode):
             source_ref = asr_info.get('source_ref', {})
             fps = asr_info.get('fps', 30)
 
-            # Generate user prompt with ASR sentence info
-            user_prompt = get_prompt(
-                "speech_rough_cut.user",
-                lang=node_state.lang,
-                asr_sentence_info=asr_info.get("asr_sentence_info", {})
-            )
+            rough_cut_json = []
 
-            # Call LLM for rough cut JSON
-            try:
-                raw = await llm.complete(
-                    system_prompt=system_prompt,
-                    user_prompt=user_prompt,
-                    media=None,
-                    temperature=0.1,
-                    top_p=0.9,
-                    max_tokens=8092,
-                    model_preferences=None,
+            for sentence in asr_info.get("asr_sentence_info", []):
+                # Generate user prompt with ASR sentence info
+                user_prompt = get_prompt(
+                    "speech_rough_cut.user",
+                    lang=node_state.lang,
+                    curr_asr_sentence_info=sentence,
+                    asr_text=asr_info.get("asr_text", ''),
                 )
-                rough_cut_json = parse_json_list(raw)
-            except Exception as e:
-                # fallback to original ASR if LLM fails
-                node_state.node_summary.warn(f"LLM rough cut failed: {e}")
-                rough_cut_json = asr_info.get("asr_sentence_info", [])
+
+                # Call LLM for rough cut JSON
+                try:
+                    raw = await llm.complete(
+                        system_prompt=system_prompt,
+                        user_prompt=user_prompt,
+                        media=None,
+                        temperature=0.1,
+                        top_p=0.9,
+                        max_tokens=8092,
+                        model_preferences=None,
+                    )
+                    parsed_json = parse_json_list(raw)
+                    print(parsed_json)
+                    rough_cut_json += parsed_json
+                except Exception as e:
+                    # fallback to original ASR if LLM fails
+                    node_state.node_summary.warn(f"LLM rough cut failed: {e}")
+                
 
             # Group sentences based on gap threshold
             segments_groups = self.group_sentences(rough_cut_json, gap_threshold=gap_threshold)
