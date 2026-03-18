@@ -112,7 +112,6 @@ class SpeechRoughCutNode(BaseNode):
 
             # Compute deleted ranges and recalibrate ASR timestamps
             deleted_ranges = self.compute_deleted_ranges(filtered_segments)
-            breakpoint()
             rough_cut_json = self.calibrate_asr_times(rough_cut_json, deleted_ranges)
             rough_cut_jsons.append(rough_cut_json)
 
