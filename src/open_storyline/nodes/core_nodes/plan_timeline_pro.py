@@ -1,5 +1,5 @@
 from typing import List, Dict, Tuple, Union, Any
-import json
+import re
 import random
 from src.open_storyline.config import Settings
 from itertools import accumulate, pairwise
@@ -249,7 +249,7 @@ class TimeLine:
                 group_texts, group_start_timestamps, group_durations = [], [], []
                 for clip in rough_cut_json:
                     
-                    text = clip.get("text", "")
+                    text = re.sub(r"[^\w\s]", " ", clip.get("text", ""))
                     duration = clip.get("end", 0) - clip.get("start", 0)
                     start_timestamp = clip.get("start", 0)
 
