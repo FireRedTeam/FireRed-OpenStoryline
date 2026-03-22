@@ -288,9 +288,31 @@ cd <repo-root> && find .storyline/.server_cache/<session_id> -name "output_*.mp4
 #### 判定标准
 有 `output_*.mp4` 即认为剪辑成功。
 
+### 10) 发送视频
+
 将生成的视频发送给用户观看，询问用户反馈。
 
-### 10) 二次编辑
+#### OpenClaw + 飞书 APP 场景视频发送指南
+
+如果你是 OpenClaw 且用户使用手机飞书 APP，使用如下专属指南。要求：
+- Python 3.6+
+- 已安装 `requests`
+  ```bash
+  python3 -m pip install requests
+  ```
+- OpenClaw 已配置飞书渠道
+
+运行脚本示例如下，此脚本会自动从 ~/.openclaw/openclaw.json 读取飞书凭证。
+receive-id 的选择
+- oc_xxx -> chat_id：发到群聊或当前单聊会话，优先推荐
+- ou_xxx -> open_id：发给指定用户 
+- on_xxx -> user_id：仅当明确拿到的是 user_id 时再使用
+```bash
+cd <repo-root> && source .venv/bin/activate && python <skills-root>/scripts/feishu_file_sender.py --help
+cd <repo-root> && source .venv/bin/activate && python <skills-root>/scripts/feishu_file_sender.py --file /absolute/path/to/video.mp4 --receive-id-type chat_id --receive-id oc_xxx
+```
+
+### 11) 二次编辑
 
 在已经生成视频的情况下，如果用户对视频内容不满意，**可以复用同一个 `session_id` 继续修改视频**，并生成新的 `output_*.mp4`。
 
