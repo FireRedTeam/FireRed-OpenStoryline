@@ -25,7 +25,7 @@ class SpeechRoughCutNode(BaseNode):
         description="Perform rough cut on speech clips based on ASR results",
         node_id="speech_rough_cut",
         node_kind="speech_rough_cut",
-        require_prior_kind=['asr'],
+        require_prior_kind=['asr', 'speech_rough_cut'],
         default_require_prior_kind=['asr'],
         next_available_node=[],
     )
@@ -50,6 +50,9 @@ class SpeechRoughCutNode(BaseNode):
         - Returns final clip metadata and updated ASR json
         """
         asr_infos = inputs["asr"].get('asr_infos', [])
+        history_rough_cut_jsons = inputs.get('speech_rough_cut', {}).get('rough_cut_jsons', [])
+        history_rough_cut_jsons = [[{'text': item.get('text', '')} for item in sublist] for sublist in history_rough_cut_jsons]
+        user_request = inputs.get('user_request', {})
         gap_threshold = inputs.get('gap_threshold', 400)
         output_directory = self._prepare_output_directory(node_state, inputs)
         llm = node_state.llm
@@ -64,14 +67,20 @@ class SpeechRoughCutNode(BaseNode):
             fps = asr_info.get('fps', 30)
 
             rough_cut_json = []
+            pre_ctx, nxt_ctx = '', ''
+            asr_sentence_info = asr_info.get("asr_sentence_info", [])
 
-            for sentence in asr_info.get("asr_sentence_info", []):
+            for i, sentence in enumerate(asr_sentence_info):
                 # Generate user prompt with ASR sentence info
                 user_prompt = get_prompt(
                     "speech_rough_cut.user",
                     lang=node_state.lang,
                     curr_asr_sentence_info=json.dumps(sentence),
                     asr_text=asr_info.get("asr_text", ''),
+                    history_rough_cut_jsons=json.dumps(history_rough_cut_jsons),
+                    user_request=user_request,
+                    pre_ctx=asr_sentence_info[i-1]["text"] if i > 0 else '',
+                    nxt_ctx=asr_sentence_info[i+1]["text"] if i < len(asr_sentence_info) - 1 else '',
                 )
 
                 # Call LLM for rough cut JSON

@@ -39,7 +39,7 @@ class LocalASRNode(BaseNode):
             return self.asr_model
         
     def extract_audio_wav(self, video_path: str, tmpdir: str):
-        # 1. 判断是否有音轨
+        # 1. Determine if there is an audio track
         probe_cmd = [
             "ffprobe",
             "-v", "error",
@@ -56,11 +56,12 @@ class LocalASRNode(BaseNode):
         
         out_wav = os.path.join(tmpdir, "audio.wav")
 
-        # 3. 提取音频
+        # 3. Extract audio
         ffmpeg_cmd = [
             "ffmpeg",
             "-y",
             "-i", video_path,
+            "-af", "afftdn,agate=threshold=-40dB:ratio=10:attack=20:release=100",
             "-vn",
             "-acodec", "pcm_s16le",
             "-ar", "16000",

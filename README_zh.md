@@ -53,6 +53,7 @@
 
 ## NEWS
 
+- 🚀 **2026-03-22**：新增**基于ASR的口播视频粗剪Skill**，支持自动去除口头禅、语气词和重复表达，并结合时间戳进行精准切分，提升口播类视频的剪辑效率与成片质量。
 - 🔥 **2026-03-12**：接入**OpenClaw**，新增 `openstoryline-install` 与 `openstoryline-use` 两个 OpenClaw Skills，分别覆盖安装首跑与实际使用流程；添加面向 **Claude Code** 的 Skill 使用说明，方便 **Claude Code** 依据仓库规范完成安装与调用。
 - **2026-2-10**：FireRed-OpenStoryline 正式开源。
 

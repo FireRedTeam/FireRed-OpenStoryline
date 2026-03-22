@@ -227,6 +227,7 @@ class SpeechRoughCutInput(BaseInput):
         description="auto: Perform rough cut on speech clips based on ASR results; skip: Skip rough cut; default: Use default rough cut method (same as skip)"
     )
     gap_threshold: Annotated[int, Field(default=400, description="Gap threshold for grouping sentences into subtitle units (milliseconds)")]
+    user_request: Annotated[str, Field(default="", description="User's requirements for rough cut results, such as expected clip length, whether to split at natural pauses, etc. If not provided, the system will formulate a request based on media content and general editing principles.")] = ""
 
 class UnderstandClipsInput(BaseModel):
     mode: Literal["auto", "skip", "default"] = Field(
