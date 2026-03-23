@@ -97,41 +97,67 @@
 > ⚖️ <b>Disclaimer:</b> User footage and brand logos shown in the demos are for technical demonstration purposes only. Ownership belongs to the original creators. Please contact us for copyright concerns.
 > </sub>
 
-## 🤖 Use via OpenClaw / Claude Code
+## 🤖 Use Through an Agent
 
 FireRed-OpenStoryline supports usage through Agent Skills.
-
-### OpenClaw
-
-We provide two OpenClaw Skills:
+We provide two Skills:
 
 * `openstoryline-install`: for installation, configuration, and first-run verification.
 * `openstoryline-use`: for starting the service and running the actual video editing workflow.
 
+### OpenClaw
+
+Just tell OpenClaw: “I want to try OpenStoryline. Help me install the required Skills,” and it will automatically trigger the installation.
+If the installation runs into problems, use the following commands to install them manually:
+
 ```bash
-npm i -g clawhub
-clawhub install openstoryline-install
-clawhub install openstoryline-use
+openclaw skills install openstoryline-install
+openclaw skills install openstoryline-use
 ```
 
-After installation, you only need to send your media source paths to OpenClaw, and it can help you complete the entire process from installing FireRed-OpenStoryline to generating the final video.
+If your current OpenClaw version does not support `openclaw skills install`, or if installation still fails, you can use ClawHub instead:
+
+```bash
+npx clawhub install openstoryline-install
+npx clawhub install openstoryline-use
+```
+
+Once installed, you only need to send your media assets to OpenClaw, and it can help you complete the entire process from installing FireRed-OpenStoryline to generating the final video.
 
 ### Claude Code
 
-This repository includes built-in Claude Code Skills.
-If you launch Claude Code from **the repository root**, you can directly use the project-level Skills included in this repo, and Claude Code can help you install FireRed-OpenStoryline.
+This repository comes with built-in Claude Code Skills.
+If you start Claude Code from the **root directory of this repository**, you can use the project-level Skills included in the repo directly. Claude Code can then help you install and use FireRed-OpenStoryline.
 
 ```bash
 /openstoryline-install
+/openstoryline-use
 ```
 
-If you want to install the Skill into your own global Claude Code configuration, run:
+If you want to install these two Skills into your own global Claude Code configuration, run:
 
 ```bash
 mkdir -p ~/.claude/skills
 cp -R .claude/skills/openstoryline-install ~/.claude/skills/
+cp -R .claude/skills/openstoryline-use ~/.claude/skills/
 ```
 
+### Other Compatible Agents (Experimental)
+
+These Skills are based on an open Agent Skills format, so in theory they can also be installed into other compatible agents.
+For example, you can install them into Codex via the Skills CLI:
+
+```bash
+npx skills add FireRedTeam/FireRed-OpenStoryline --skill openstoryline-install --agent codex
+npx skills add FireRedTeam/FireRed-OpenStoryline --skill openstoryline-use --agent codex
+```
+
+Or use the commands below with the `--global` flag to install these Skills into the user-level directory so they are available across projects:
+
+```bash
+npx skills add FireRedTeam/FireRed-OpenStoryline --skill openstoryline-install --global
+npx skills add FireRedTeam/FireRed-OpenStoryline --skill openstoryline-use --global
+```
 
 ## 📦 Install
 ### 1. Clone repository

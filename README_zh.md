@@ -101,38 +101,64 @@
 > ⚖️ <b>免责声明：</b>演示中包含的用户自摄素材及品牌标识仅作技术能力展示，版权归原作者所有。如有侵权请联系删除。
 > </sub>
 
-## 🤖 通过 OpenClaw / Claude Code 使用
+## 🤖 通过 Agent 使用
 
 FireRed-OpenStoryline 支持通过 Agent Skills 使用。
-
-### OpenClaw
-我们提供了两个 OpenClaw Skills：
+我们提供了两个 Skills：
 
 - `openstoryline-install`：用于安装、配置与首跑验证。
 - `openstoryline-use`：用于启动服务并执行实际视频剪辑流程。
 
+### OpenClaw
+
+直接告诉OpenClaw：“我想体验 openstoryline，帮我安装相关 Skills”，即可自动触发安装。
+如果安装遇到问题，使用下面的命令手动安装：
+
 ```bash
-npm i -g clawhub
-clawhub install openstoryline-install
-clawhub install openstoryline-use
+openclaw skills install openstoryline-install
+openclaw skills install openstoryline-use
 ```
 
-安装后，只需要将素材地址发给 OpenClaw，它就可以帮你完成从安装 FireRed-OpenStoryline 到成片的整个过程。
+如果你的 OpenClaw 版本不支持 `openclaw skills install`，或者安装仍然失败，可以改用 ClawHub：
+```bash
+npx clawhub install openstoryline-install
+npx clawhub install openstoryline-use
+```
+
+安装后，只需要将素材发给 OpenClaw，它就可以帮你完成从安装 FireRed-OpenStoryline 到成片的整个过程。
 
 ### Claude Code
 
 本仓库内置了 Claude Code Skills。  
-如果你在**仓库根目录**启动 Claude Code，可直接使用仓库中的项目级 Skills，Claude Code 可以帮你完成 FireRed-OpenStoryline 的安装。
+如果你在**仓库根目录**启动 Claude Code，可直接使用仓库中的项目级 Skills，Claude Code 可以帮你完成 FireRed-OpenStoryline 的安装与使用。
 
 ```bash
 /openstoryline-install
+/openstoryline-use
 ```
 
-如果你想把这个 Skill 安装到你自己的 Claude Code 全局配置中，可执行：
+如果你想把这两个 Skills 安装到你自己的 Claude Code 全局配置中，可执行：
 
 ```bash
 mkdir -p ~/.claude/skills
 cp -R .claude/skills/openstoryline-install ~/.claude/skills/
+cp -R .claude/skills/openstoryline-use ~/.claude/skills/
+```
+
+### 其他兼容 Agent（实验性）
+
+这些 Skills 基于开放的 Agent Skills 格式，理论上也可安装到其他兼容的 agent 中。
+例如，可通过 Skills CLI 安装到 Codex：
+
+```bash
+npx skills add FireRedTeam/FireRed-OpenStoryline --skill openstoryline-install --agent codex
+npx skills add FireRedTeam/FireRed-OpenStoryline --skill openstoryline-use --agent codex
+```
+
+或者使用下面的命令，选择 --global 参数将此技能安装到用户级目录，跨项目可用：
+```bash
+npx skills add FireRedTeam/FireRed-OpenStoryline --skill openstoryline-install --global
+npx skills add FireRedTeam/FireRed-OpenStoryline --skill openstoryline-use --global
 ```
 
 ## 📦 安装
