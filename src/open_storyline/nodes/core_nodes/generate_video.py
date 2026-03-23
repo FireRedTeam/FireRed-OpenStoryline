@@ -138,40 +138,6 @@ class FirstLastFrameToVideoNode(BaseNode):
     
     async def default_process(self, node_state: NodeState, inputs: Dict[str, Any]) -> Any:
         return await self.process(node_state, inputs)
-
-        # first_frame = inputs["first_frame_url"]
-        # last_frame = inputs["last_frame_url"]
-        
-        # self.log_vision_step(
-        #     node_state, 
-        #     self.meta.node_id, 
-        #     f"校验首尾帧成功，准备执行过渡视频生成..."
-        # )
-        
-        # # 1. 组装特定于首尾帧生成的 API Payload
-        # api_payload = {
-        #     "image_url": first_frame,         # 多数API的首帧参数
-        #     "image_tail_url": last_frame,     # 多数API的尾帧参数 (如可灵Kling API)
-        #     "prompt": inputs.get("prompt", "自然演变，平滑过渡"), 
-        #     "duration": inputs.get("duration", 5),
-        #     "aspect_ratio": inputs.get("aspect_ratio", "16:9")
-        # }
-        
-        # # 2. 调用 Mixin 中的通用任务提交与轮询逻辑
-        # final_url = await self.submit_and_poll_task(
-        #     node_state, 
-        #     self.meta.node_id, 
-        #     api_payload, 
-        #     endpoint="https://api.vision.com/v1/first-last-frame-to-video"
-        # )
-        
-        # # 3. 返回统一格式，并携带原始素材信息方便下游追溯
-        # return self.format_vision_result(
-        #     media_type="video", 
-        #     url=final_url, 
-        #     first_frame_used=first_frame,
-        #     last_frame_used=last_frame
-        # )
     
     def _load_clip(
         self,
