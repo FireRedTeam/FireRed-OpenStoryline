@@ -185,7 +185,7 @@ sh build_env.sh
 
 ##### B. Windows
 
-  - Step 1: Prepare Directory: Create a new directory named `.storyline` in the project root directory.
+  - Step 1: Prepare Directory: Create a new directory named `resource` in the project root directory.
 
   - Step 2: Download and Extract:
 

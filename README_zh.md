@@ -190,7 +190,7 @@ sh build_env.sh
     ```
 
 ###### B. Windows
-  - Step 1: 准备目录：在项目根目录下新建目录 `.storyline`。
+  - Step 1: 准备目录：在项目根目录下新建目录 `resource`。
 
   - Step 2: 下载并解压：
 
