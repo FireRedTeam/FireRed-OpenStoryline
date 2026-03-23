@@ -278,7 +278,7 @@ class FirstLastFrameToVideoNode(BaseNode):
             last_frame=last_frame_data_url,
             resolution="480P",
             duration=5,
-            prompt_optimizer=True
+            prompt_optimizer=True,
             output_dir=output_dir,
         )
         
