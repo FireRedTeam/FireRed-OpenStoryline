@@ -68,6 +68,12 @@ CHUNK_SIZE = 1024 * 1024  # 1MB
 USE_SESSION_SUBDIR = True
 
 CUSTOM_MODEL_KEY = "__custom__"
+SESSION_STATE_FILENAME = "session_state.json"
+SESSION_STATE_MAX_HISTORY = 2000
+SESSION_STATE_MAX_LC_MESSAGES = 4000
+UPLOAD_STATUS_SYSTEM_PREFIX = "【User media upload status】"
+UPLOAD_STATUS_SYSTEM_EMPTY = "【User media upload status】{}"
+MASKED_SECRET = "***"
 
 def debug_traceback_print(cfg: Settings):
     if cfg.developer.developer_mode:
@@ -282,6 +288,164 @@ def detect_media_kind(filename: str) -> str:
     if ext in {".mp4", ".mov", ".avi", ".mkv", ".webm"}:
         return "video"
     return "unknown"
+
+
+_SECRET_VALUE_PATTERNS = [
+    re.compile(r"sk-[A-Za-z0-9._-]{16,}"),
+    re.compile(r"Bearer\s+[A-Za-z0-9._\-+/=]{16,}", re.IGNORECASE),
+    re.compile(r"eyJ[A-Za-z0-9_-]{16,}\.[A-Za-z0-9._-]{16,}\.?[A-Za-z0-9._-]*"),
+    re.compile(r"(?i)(?:api[_-]?key|access[_-]?token|refresh[_-]?token|authorization)\s*[:=]\s*[\"']?[A-Za-z0-9._\-+/=]{16,}[\"']?"),
+]
+
+
+def _mask_secret_string(text: str) -> str:
+    s = str(text or "")
+    for pat in _SECRET_VALUE_PATTERNS:
+        s = pat.sub(MASKED_SECRET, s)
+    return s
+
+
+def _to_json_safe(v: Any) -> Any:
+    if v is None or isinstance(v, (bool, int, float, str)):
+        return v
+    if isinstance(v, list):
+        return [_to_json_safe(x) for x in v]
+    if isinstance(v, tuple):
+        return [_to_json_safe(x) for x in v]
+    if isinstance(v, dict):
+        return {str(k): _to_json_safe(x) for k, x in v.items()}
+    try:
+        json.dumps(v, ensure_ascii=False)
+        return v
+    except Exception:
+        return str(v)
+
+
+def _mask_secrets_recursive(v: Any) -> Any:
+    if isinstance(v, dict):
+        out: Dict[str, Any] = {}
+        for k, val in v.items():
+            key = str(k)
+            if _is_secret_field_name(key):
+                out[key] = MASKED_SECRET
+            else:
+                out[key] = _mask_secrets_recursive(val)
+        return out
+    if isinstance(v, list):
+        return [_mask_secrets_recursive(x) for x in v]
+    if isinstance(v, tuple):
+        return [_mask_secrets_recursive(x) for x in v]
+    if isinstance(v, str):
+        return _mask_secret_string(v)
+    return _to_json_safe(v)
+
+
+def _mask_tool_history_record(rec: Dict[str, Any]) -> Dict[str, Any]:
+    r = dict(rec or {})
+    for key in ("args", "summary", "message"):
+        if key in r:
+            r[key] = _mask_secrets_recursive(r.get(key))
+    return r
+
+
+def _serialize_lc_message(msg: BaseMessage) -> Dict[str, Any]:
+    if isinstance(msg, SystemMessage):
+        return {"type": "system", "content": _to_json_safe(msg.content)}
+    if isinstance(msg, HumanMessage):
+        return {"type": "human", "content": _to_json_safe(msg.content)}
+    if isinstance(msg, ToolMessage):
+        payload = {
+            "type": "tool",
+            "content": _to_json_safe(msg.content),
+            "tool_call_id": str(getattr(msg, "tool_call_id", "") or ""),
+        }
+        ak = getattr(msg, "additional_kwargs", None)
+        if isinstance(ak, dict) and ak:
+            payload["additional_kwargs"] = _to_json_safe(ak)
+        name = getattr(msg, "name", None)
+        if name not in (None, ""):
+            payload["name"] = str(name)
+        return payload
+    if isinstance(msg, AIMessage):
+        ak = getattr(msg, "additional_kwargs", None) or {}
+        return {
+            "type": "ai",
+            "content": _to_json_safe(msg.content),
+            "additional_kwargs": _to_json_safe(ak),
+        }
+    return {
+        "type": "unknown",
+        "content": _to_json_safe(getattr(msg, "content", "")),
+    }
+
+
+def _deserialize_lc_message(data: Dict[str, Any]) -> Optional[BaseMessage]:
+    if not isinstance(data, dict):
+        return None
+    t = str(data.get("type") or "").strip().lower()
+    content = data.get("content", "")
+    if t == "system":
+        return SystemMessage(content=content)
+    if t == "human":
+        return HumanMessage(content=content)
+    if t == "tool":
+        tcid = str(data.get("tool_call_id") or "").strip()
+        if not tcid:
+            return None
+        kwargs: Dict[str, Any] = {}
+        ak = data.get("additional_kwargs")
+        if isinstance(ak, dict):
+            kwargs["additional_kwargs"] = ak
+        name = data.get("name")
+        if name not in (None, ""):
+            kwargs["name"] = str(name)
+        try:
+            return ToolMessage(content=content, tool_call_id=tcid, **kwargs)
+        except TypeError:
+            # Keep backward compatibility with signatures that do not accept `name`.
+            kwargs.pop("name", None)
+            return ToolMessage(content=content, tool_call_id=tcid, **kwargs)
+    if t == "ai":
+        ak = data.get("additional_kwargs")
+        if not isinstance(ak, dict):
+            ak = {}
+        return AIMessage(content=content, additional_kwargs=ak)
+    return None
+
+
+def _tool_call_ids_from_ai_message_for_state(m: BaseMessage) -> Set[str]:
+    ids: Set[str] = set()
+    if not isinstance(m, AIMessage):
+        return ids
+
+    tc = getattr(m, "tool_calls", None) or []
+    for c in tc:
+        _id = None
+        if isinstance(c, dict):
+            _id = c.get("id") or c.get("tool_call_id")
+        else:
+            _id = getattr(c, "id", None) or getattr(c, "tool_call_id", None)
+        if _id:
+            ids.add(str(_id))
+
+    ak = getattr(m, "additional_kwargs", None) or {}
+    tc2 = ak.get("tool_calls") or []
+    for c in tc2:
+        if isinstance(c, dict):
+            _id = c.get("id") or c.get("tool_call_id")
+            if _id:
+                ids.add(str(_id))
+    return ids
+
+
+def _is_valid_session_id_hex(name: str) -> bool:
+    if len(name) != 32:
+        return False
+    try:
+        val = uuid.UUID(name)
+        return val.hex == name and val.version == 4
+    except Exception:
+        return False
 
 _MEDIA_RE = re.compile(r"^media_(\d+)", re.IGNORECASE)
 
@@ -1073,7 +1237,7 @@ class ChatSession:
 
         self.lc_messages: List[BaseMessage] = [
             SystemMessage(content=get_prompt("instruction.system", lang=self.lang)),
-            SystemMessage(content="【User media upload status】{}"),
+            SystemMessage(content=UPLOAD_STATUS_SYSTEM_EMPTY),
         ]
         self.history: List[Dict[str, Any]] = []
 
@@ -1096,7 +1260,330 @@ class ChatSession:
         self._media_seq_inited = False
         self._media_seq_next = 1
 
+    @classmethod
+    def state_file_path_for(cls, session_id: str, cfg: Settings) -> str:
+        return os.path.abspath(os.path.join(str(cfg.project.outputs_dir), session_id, SESSION_STATE_FILENAME))
+
+    def state_file_path(self) -> str:
+        return self.state_file_path_for(self.session_id, self.cfg)
+
+    def _serialize_load_media(self) -> Dict[str, Dict[str, Any]]:
+        out: Dict[str, Dict[str, Any]] = {}
+        for mid, meta in (self.load_media or {}).items():
+            out[str(mid)] = {
+                "id": str(meta.id),
+                "name": str(meta.name),
+                "kind": str(meta.kind),
+                "path": str(meta.path),
+                "thumb_path": str(meta.thumb_path) if meta.thumb_path else None,
+                "ts": float(meta.ts),
+            }
+        return out
+
+    @staticmethod
+    def _deserialize_load_media(data: Any) -> Dict[str, MediaMeta]:
+        out: Dict[str, MediaMeta] = {}
+        if not isinstance(data, dict):
+            return out
+        for _k, v in data.items():
+            if not isinstance(v, dict):
+                continue
+            try:
+                meta = MediaMeta(
+                    id=str(v.get("id") or ""),
+                    name=str(v.get("name") or ""),
+                    kind=str(v.get("kind") or "unknown"),
+                    path=str(v.get("path") or ""),
+                    thumb_path=(str(v.get("thumb_path")) if v.get("thumb_path") else None),
+                    ts=float(v.get("ts") or time.time()),
+                )
+                if meta.id:
+                    out[meta.id] = meta
+            except Exception:
+                continue
+        return out
+
+    @staticmethod
+    def _sanitize_service_cfg_for_state(cfg_obj: Any) -> Any:
+        if cfg_obj is None:
+            return None
+        return _mask_secrets_recursive(_to_json_safe(cfg_obj))
+
+    @staticmethod
+    def _normalized_lc_messages_for_state(messages: List[BaseMessage], lang: str) -> List[BaseMessage]:
+        instruction_sys = get_prompt("instruction.system", lang=lang)
+        upload_placeholder = UPLOAD_STATUS_SYSTEM_EMPTY
+        msgs: List[BaseMessage] = [m for m in (messages or []) if isinstance(m, BaseMessage)]
+
+        if not msgs:
+            return [SystemMessage(content=instruction_sys), SystemMessage(content=upload_placeholder)]
+
+        if not isinstance(msgs[0], SystemMessage) or str(getattr(msgs[0], "content", "")).strip() != str(instruction_sys).strip():
+            msgs.insert(0, SystemMessage(content=instruction_sys))
+
+        def _is_upload_stats_msg(m: BaseMessage) -> bool:
+            if not isinstance(m, SystemMessage):
+                return False
+            return str(getattr(m, "content", "")).strip().startswith(UPLOAD_STATUS_SYSTEM_PREFIX)
+
+        if len(msgs) == 1:
+            msgs.append(SystemMessage(content=upload_placeholder))
+        elif not _is_upload_stats_msg(msgs[1]):
+            found_idx = None
+            for i in range(2, len(msgs)):
+                if _is_upload_stats_msg(msgs[i]):
+                    found_idx = i
+                    break
+            if found_idx is not None:
+                m = msgs.pop(found_idx)
+                msgs.insert(1, m)
+            else:
+                msgs.insert(1, SystemMessage(content=upload_placeholder))
+        return msgs
+
+    def _persist_history(self) -> List[Dict[str, Any]]:
+        out: List[Dict[str, Any]] = []
+        for item in (self.history or []):
+            if not isinstance(item, dict):
+                continue
+            rec = _to_json_safe(item)
+            if not isinstance(rec, dict):
+                continue
+            if str(rec.get("role") or "") == "tool":
+                rec = _mask_tool_history_record(rec)
+            out.append(rec)
+        if SESSION_STATE_MAX_HISTORY > 0 and len(out) > SESSION_STATE_MAX_HISTORY:
+            out = out[-SESSION_STATE_MAX_HISTORY:]
+        return out
+
+    def _serialize_lc_messages(self) -> List[Dict[str, Any]]:
+        msgs = self._normalized_lc_messages_for_state(list(self.lc_messages or []), self.lang)
+        if SESSION_STATE_MAX_LC_MESSAGES > 0 and len(msgs) > SESSION_STATE_MAX_LC_MESSAGES:
+            msgs = msgs[-SESSION_STATE_MAX_LC_MESSAGES:]
+            msgs = self._normalized_lc_messages_for_state(msgs, self.lang)
+            if len(msgs) > SESSION_STATE_MAX_LC_MESSAGES:
+                if SESSION_STATE_MAX_LC_MESSAGES <= 2:
+                    msgs = msgs[:SESSION_STATE_MAX_LC_MESSAGES]
+                else:
+                    # Keep invariant-critical first 2 system messages, trim tail payload.
+                    keep_tail = SESSION_STATE_MAX_LC_MESSAGES - 2
+                    msgs = msgs[:2] + msgs[-keep_tail:]
+
+        out: List[Dict[str, Any]] = []
+        for m in msgs:
+            try:
+                out.append(_serialize_lc_message(m))
+            except Exception:
+                continue
+        return out
+
+    def dump_state(self) -> Dict[str, Any]:
+        return {
+            "version": 1,
+            "session_id": self.session_id,
+            "lang": self.lang,
+            "history": self._persist_history(),
+            "chat_model_key": self.chat_model_key,
+            "vlm_model_key": self.vlm_model_key,
+            "load_media": self._serialize_load_media(),
+            "pending_media_ids": [str(x) for x in (self.pending_media_ids or [])],
+            "lc_messages_serialized": self._serialize_lc_messages(),
+            "pexels_key_mode": self.pexels_key_mode,
+            "custom_llm_config": self._sanitize_service_cfg_for_state(self.custom_llm_config),
+            "custom_vlm_config": self._sanitize_service_cfg_for_state(self.custom_vlm_config),
+            "tts_config": self._sanitize_service_cfg_for_state(self.tts_config),
+        }
+
+    def save_state_atomic(self) -> None:
+        path = self.state_file_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".tmp"
+        data = self.dump_state()
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
+
+    def _ensure_lc_messages_invariants(self) -> None:
+        instruction_sys = get_prompt("instruction.system", lang=self.lang)
+        upload_placeholder = UPLOAD_STATUS_SYSTEM_EMPTY
+        msgs: List[BaseMessage] = [m for m in (self.lc_messages or []) if isinstance(m, BaseMessage)]
+
+        if not msgs:
+            msgs = [SystemMessage(content=instruction_sys), SystemMessage(content=upload_placeholder)]
+            self.lc_messages = msgs
+            self._attach_stats_msg_idx = 1
+            return
+
+        if not isinstance(msgs[0], SystemMessage) or str(getattr(msgs[0], "content", "")).strip() != str(instruction_sys).strip():
+            msgs.insert(0, SystemMessage(content=instruction_sys))
+
+        def _is_upload_stats_msg(m: BaseMessage) -> bool:
+            if not isinstance(m, SystemMessage):
+                return False
+            return str(getattr(m, "content", "")).strip().startswith(UPLOAD_STATUS_SYSTEM_PREFIX)
+
+        if len(msgs) <= 1:
+            msgs.append(SystemMessage(content=upload_placeholder))
+        elif not _is_upload_stats_msg(msgs[1]):
+            found_idx = None
+            for i in range(2, len(msgs)):
+                if _is_upload_stats_msg(msgs[i]):
+                    found_idx = i
+                    break
+            if found_idx is not None:
+                m = msgs.pop(found_idx)
+                msgs.insert(1, m)
+            else:
+                msgs.insert(1, SystemMessage(content=upload_placeholder))
+
+        self.lc_messages = msgs
+        self._attach_stats_msg_idx = 1
+
+    def _close_unfinished_tool_calls_in_lc_messages(self) -> None:
+        ai_ids: Set[str] = set()
+        result_ids: Set[str] = set()
+        for m in (self.lc_messages or []):
+            if isinstance(m, AIMessage):
+                ai_ids |= _tool_call_ids_from_ai_message_for_state(m)
+            elif isinstance(m, ToolMessage):
+                tcid = getattr(m, "tool_call_id", None)
+                if tcid:
+                    result_ids.add(str(tcid))
+
+        pending = sorted(ai_ids - result_ids)
+        if not pending:
+            return
+
+        cancelled_content = json.dumps({"cancelled": True, "cancelled_by_restart": True}, ensure_ascii=False)
+        for tcid in pending:
+            self.lc_messages.append(ToolMessage(content=cancelled_content, tool_call_id=str(tcid)))
+
+    def _normalize_running_tool_records(self) -> None:
+        for rec in (self.history or []):
+            if not isinstance(rec, dict):
+                continue
+            if str(rec.get("role") or "") != "tool":
+                continue
+            if str(rec.get("state") or "").lower() == "running":
+                rec["state"] = "error"
+                rec["progress"] = 1.0
+                rec["message"] = "Cancelled by restart"
+                rec["summary"] = {"cancelled": True, "cancelled_by_restart": True}
+
+    def _rebuild_tool_history_index(self) -> None:
+        self._tool_history_index = {}
+        for idx, rec in enumerate(self.history or []):
+            if not isinstance(rec, dict):
+                continue
+            if str(rec.get("role") or "") != "tool":
+                continue
+            tcid = rec.get("tool_call_id")
+            if tcid:
+                self._tool_history_index[str(tcid)] = idx
+
+    @classmethod
+    def load_from_state(cls, session_id: str, cfg: Settings) -> Optional["ChatSession"]:
+        path = cls.state_file_path_for(session_id, cfg)
+        if not os.path.exists(path):
+            return None
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                return None
+            sid_in_file = str(data.get("session_id") or "").strip()
+            if sid_in_file and sid_in_file != session_id:
+                return None
+        except Exception:
+            return None
+
+        sess = cls(session_id=session_id, cfg=cfg)
+        sess.lang = str(data.get("lang") or "zh").strip().lower()
+        if sess.lang not in ("zh", "en"):
+            sess.lang = "zh"
+
+        sess.history = list(data.get("history") or [])
+        sess.chat_model_key = str(data.get("chat_model_key") or sess.chat_model_key)
+        sess.vlm_model_key = str(data.get("vlm_model_key") or sess.vlm_model_key)
+        sess.load_media = cls._deserialize_load_media(data.get("load_media"))
+
+        pending_ids = [str(x) for x in (data.get("pending_media_ids") or [])]
+        sess.pending_media_ids = [x for x in pending_ids if x in sess.load_media]
+
+        lc_msgs_raw = data.get("lc_messages_serialized") or []
+        lc_msgs: List[BaseMessage] = []
+        if isinstance(lc_msgs_raw, list):
+            for item in lc_msgs_raw:
+                try:
+                    msg = _deserialize_lc_message(item)
+                    if msg is not None:
+                        lc_msgs.append(msg)
+                except Exception:
+                    continue
+        sess.lc_messages = lc_msgs
+        sess._ensure_lc_messages_invariants()
+
+        sess.pexels_key_mode = str(data.get("pexels_key_mode") or "default").strip().lower()
+        if sess.pexels_key_mode not in ("default", "custom"):
+            sess.pexels_key_mode = "default"
+        sess.pexels_custom_key = ""
+
+        llm_cfg = data.get("custom_llm_config")
+        sess.custom_llm_config = llm_cfg if isinstance(llm_cfg, dict) else None
+        vlm_cfg = data.get("custom_vlm_config")
+        sess.custom_vlm_config = vlm_cfg if isinstance(vlm_cfg, dict) else None
+        tts_cfg = data.get("tts_config")
+        sess.tts_config = tts_cfg if isinstance(tts_cfg, dict) else {}
+
+        sess._normalize_running_tool_records()
+        sess._close_unfinished_tool_calls_in_lc_messages()
+        sess._rebuild_tool_history_index()
+        sess._ensure_lc_messages_invariants()
+        return sess
+
+    def _missing_secret_config_fields(self) -> List[str]:
+        missing: List[str] = []
+
+        def _is_missing(v: Any) -> bool:
+            s = str(v or "").strip()
+            return (not s) or s == MASKED_SECRET
+
+        if self.chat_model_key == CUSTOM_MODEL_KEY:
+            cfg = self.custom_llm_config if isinstance(self.custom_llm_config, dict) else {}
+            if _is_missing(cfg.get("model")) or _is_missing(cfg.get("base_url")) or _is_missing(cfg.get("api_key")):
+                missing.append("custom_llm")
+
+        if self.vlm_model_key == CUSTOM_MODEL_KEY:
+            cfg = self.custom_vlm_config if isinstance(self.custom_vlm_config, dict) else {}
+            if _is_missing(cfg.get("model")) or _is_missing(cfg.get("base_url")) or _is_missing(cfg.get("api_key")):
+                missing.append("custom_vlm")
+
+        if (self.pexels_key_mode or "").lower() == "custom":
+            if _is_missing(self.pexels_custom_key):
+                missing.append("pexels_custom")
+
+        tts_cfg = self.tts_config if isinstance(self.tts_config, dict) else {}
+        provider = str(tts_cfg.get("provider") or "").strip().lower()
+        if provider:
+            block = tts_cfg.get(provider)
+            if not isinstance(block, dict):
+                missing.append(f"tts:{provider}")
+            else:
+                has_secret_key = False
+                miss_secret = False
+                for k, v in block.items():
+                    if _is_secret_field_name(str(k)):
+                        has_secret_key = True
+                        if _is_missing(v):
+                            miss_secret = True
+                if has_secret_key and miss_secret:
+                    missing.append(f"tts:{provider}")
+
+        return sorted(set(missing))
+
     def _ensure_system_prompt(self) -> None:
+        # Keep the instruction system prompt and upload-status placeholder stable.
+        self._ensure_lc_messages_invariants()
         sys = (get_prompt("instruction.system", lang=self.lang) or "").strip()
         if not sys:
             return
@@ -1197,6 +1684,13 @@ class ChatSession:
         return True, None
 
     async def ensure_agent(self) -> None:
+        missing = self._missing_secret_config_fields()
+        if missing:
+            raise RuntimeError(
+                "requires_reconfig: custom llm/vlm/tts/pexels secrets missing after restart; "
+                f"missing={','.join(missing)}"
+            )
+
         # 1) resolve LLM override
         if self.chat_model_key == CUSTOM_MODEL_KEY:
             if not isinstance(self.custom_llm_config, dict):
@@ -1481,17 +1975,45 @@ class SessionStore:
         sess = ChatSession(sid, self.cfg)
         async with self._lock:
             self._sessions[sid] = sess
+        await self.save_session_state(sess)
         return sess
 
     async def get(self, sid: str) -> Optional[ChatSession]:
         async with self._lock:
-            return self._sessions.get(sid)
+            sess = self._sessions.get(sid)
+            if sess is not None:
+                return sess
+
+        sid = str(sid or "").strip()
+        if not _is_valid_session_id_hex(sid):
+            return None
+
+        restored = ChatSession.load_from_state(sid, self.cfg)
+        if restored is None:
+            return None
+        try:
+            restored.save_state_atomic()
+        except Exception:
+            pass
+
+        async with self._lock:
+            existing = self._sessions.get(sid)
+            if existing is not None:
+                return existing
+            self._sessions[sid] = restored
+            return restored
 
     async def get_or_404(self, sid: str) -> ChatSession:
         sess = await self.get(sid)
         if not sess:
             raise HTTPException(status_code=404, detail="session not found")
         return sess
+
+    async def save_session_state(self, sess: ChatSession) -> None:
+        try:
+            sess.save_state_atomic()
+        except Exception as e:
+            logger.warning("failed to persist session state. sid=%s err=%s", getattr(sess, "session_id", "?"), e)
 
 
 @asynccontextmanager
@@ -1553,15 +2075,21 @@ async def _enforce_upload_media_count_limit(request: Request, cost: float) -> Op
 
 _TTS_UI_SECRET_KEYS = {
     "api_key",
+    "api-token",
+    "api_token",
+    "auth_token",
     "access_token",
     "authorization",
     "token",
     "password",
     "secret",
+    "client_secret",
+    "refresh_token",
     "x-api-key",
     "apikey",
     "access_key",
     "accesskey",
+    "pexels_api_key",
 }
 
 def _is_secret_field_name(k: str) -> bool:
@@ -1701,12 +2229,13 @@ async def clear_session_chat(session_id: str):
         sess._attach_stats_msg_idx = 1
         sess.lc_messages = [
             SystemMessage(content=get_prompt("instruction.system", lang=sess.lang)),
-            SystemMessage(content="【User media upload status】{}"),
+            SystemMessage(content=UPLOAD_STATUS_SYSTEM_EMPTY),
         ]
         sess._attach_stats_msg_idx = 1
 
         sess.history = []
         sess._tool_history_index = {}
+        await store.save_session_state(sess)
     return JSONResponse({"ok": True})
 
 @api.post("/sessions/{session_id}/cancel")
@@ -1761,6 +2290,8 @@ async def upload_media(session_id: str, request: Request, files: List[UploadFile
         finally:
             async with sess.media_lock:
                 sess._direct_upload_reservations = max(0, sess._direct_upload_reservations - n)
+
+        await store.save_session_state(sess)
 
         return JSONResponse({
             "media": [sess.public_media(m) for m in metas],
@@ -1944,6 +2475,8 @@ async def complete_resumable_media_upload(session_id: str, upload_id: str):
             sess.load_media[meta.id] = meta
             sess.pending_media_ids.append(meta.id)
 
+        await store.save_session_state(sess)
+
         return JSONResponse({
             "media": sess.public_media(meta),
             "pending_media": sess.public_pending_media(),
@@ -1988,6 +2521,7 @@ async def delete_pending_media(session_id: str, media_id: str):
     store: SessionStore = app.state.sessions
     sess = await store.get_or_404(session_id)
     await sess.delete_pending_media(media_id)
+    await store.save_session_state(sess)
     return JSONResponse({"ok": True, "pending_media": sess.public_pending_media()})
 
 
@@ -2190,6 +2724,7 @@ async def ws_chat(ws: WebSocket, session_id: str):
                     if sess.client_context:
                         sess.client_context.lang = lang
 
+                    await store.save_session_state(sess)
                     await ws_send(ws, "session.lang", {"lang": lang})
                     continue
 
@@ -2199,11 +2734,12 @@ async def ws_chat(ws: WebSocket, session_id: str):
                         sess._attach_stats_msg_idx = 1
                         sess.lc_messages = [
                             SystemMessage(content=get_prompt("instruction.system", lang=sess.lang)),
-                            SystemMessage(content="【User media upload status】{}"),
+                            SystemMessage(content=UPLOAD_STATUS_SYSTEM_EMPTY),
                         ]
                         sess._attach_stats_msg_idx = 1
                         sess.history = []
                         sess._tool_history_index = {}
+                        await store.save_session_state(sess)
                     await ws_send(ws, "chat.cleared", {"ok": True})
                     continue
 
@@ -2344,6 +2880,7 @@ async def ws_chat(ws: WebSocket, session_id: str):
                         }
                         sess.history.append(user_msg)
                         sess.lc_messages.append(HumanMessage(content=prompt))
+                        await store.save_session_state(sess)
 
                         if app.state.cfg.developer.print_context:
                             print("[LLM_CTX]", session_id, sess.lc_messages, flush=True)
@@ -2715,6 +3252,7 @@ async def ws_chat(ws: WebSocket, session_id: str):
                                         # ★打断：只发 assistant.end，带 interrupted=true
                                         await emit_turn_event("assistant.end", {"text": interrupted_text, "interrupted": True})
 
+                                        await store.save_session_state(sess)
                                         sess.cancel_event.clear()
                                         break
 
@@ -2778,6 +3316,7 @@ async def ws_chat(ws: WebSocket, session_id: str):
                                             sess.lc_messages.extend(new_messages)
 
                                         await emit_turn_event("assistant.end", {"text": final_text})
+                                        await store.save_session_state(sess)
                                         break
 
                                     if kind == "agent.error":
@@ -2799,6 +3338,7 @@ async def ws_chat(ws: WebSocket, session_id: str):
 
                                         # ★ 真异常：只发 error（并带 partial_text 让前端结束当前气泡）
                                         await emit_turn_event("error", {"message": err_text, "partial_text": partial})
+                                        await store.save_session_state(sess)
                                         break
                         
                         except WebSocketDisconnect:
