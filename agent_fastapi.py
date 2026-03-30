@@ -409,7 +409,17 @@ def _deserialize_lc_message(data: Dict[str, Any]) -> Optional[BaseMessage]:
         ak = data.get("additional_kwargs")
         if not isinstance(ak, dict):
             ak = {}
-        return AIMessage(content=content, additional_kwargs=ak)
+        # Some providers (and langchain-core versions) require tool calls to be present
+        # on the AIMessage object (not only inside additional_kwargs) in order to
+        # produce a valid OpenAI-style messages list. Without this, ToolMessage
+        # may become an "orphan" and providers will reject the request.
+        tool_calls = ak.get("tool_calls")
+        if not isinstance(tool_calls, list):
+            tool_calls = []
+        try:
+            return AIMessage(content=content, additional_kwargs=ak, tool_calls=tool_calls)  # type: ignore[arg-type]
+        except TypeError:
+            return AIMessage(content=content, additional_kwargs=ak)
     return None
 
 
@@ -1458,6 +1468,34 @@ class ChatSession:
         for tcid in pending:
             self.lc_messages.append(ToolMessage(content=cancelled_content, tool_call_id=str(tcid)))
 
+    def _sanitize_tool_protocol_in_lc_messages(self) -> None:
+        """
+        Ensure lc_messages won't violate OpenAI tool-calling protocol:
+        ToolMessage must correspond to a preceding AIMessage tool_call_id.
+        When restore/serialization fails to fully reconstruct tool_calls,
+        providers may reject requests with 400. We drop orphan ToolMessages here.
+        """
+        msgs_in: List[BaseMessage] = [m for m in (self.lc_messages or []) if isinstance(m, BaseMessage)]
+        pending_ids: Set[str] = set()
+        responded_ids: Set[str] = set()
+        msgs_out: List[BaseMessage] = []
+
+        for m in msgs_in:
+            if isinstance(m, AIMessage):
+                pending_ids |= _tool_call_ids_from_ai_message_for_state(m)
+                msgs_out.append(m)
+                continue
+            if isinstance(m, ToolMessage):
+                tcid = str(getattr(m, "tool_call_id", "") or "").strip()
+                if tcid and (tcid in pending_ids) and (tcid not in responded_ids):
+                    responded_ids.add(tcid)
+                    msgs_out.append(m)
+                # else: drop orphan/duplicate tool message
+                continue
+            msgs_out.append(m)
+
+        self.lc_messages = msgs_out
+
     def _normalize_running_tool_records(self) -> None:
         for rec in (self.history or []):
             if not isinstance(rec, dict):
@@ -1536,6 +1574,7 @@ class ChatSession:
         sess.tts_config = tts_cfg if isinstance(tts_cfg, dict) else {}
 
         sess._normalize_running_tool_records()
+        sess._sanitize_tool_protocol_in_lc_messages()
         sess._close_unfinished_tool_calls_in_lc_messages()
         sess._rebuild_tool_history_index()
         sess._ensure_lc_messages_invariants()
@@ -2911,6 +2950,9 @@ async def ws_chat(ws: WebSocket, session_id: str):
                         async def pump_agent():
                             nonlocal new_messages
                             try:
+                                # Guard: ensure the messages list won't violate tool protocol after restore.
+                                # This prevents provider-side 400 like: "Messages with role 'tool' must be a response..."
+                                sess._sanitize_tool_protocol_in_lc_messages()
                                 stream = sess.agent.astream(
                                     {"messages": sess.lc_messages},
                                     context=sess.client_context,
