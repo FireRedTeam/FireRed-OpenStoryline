@@ -31,7 +31,7 @@ class TimeLine:
         '''
         Re-edit meterial durations according to tts duration or beats.
         '''
-        if 'is_speech_rough_cut' in kwargs and kwargs['is_speech_rough_cut'] is True:
+        if kwargs.get("is_speech_rough_cut", False) or kwargs.get("is_ai_transition", False):
             return 0, meterial_durations, [1.0 for _ in meterial_durations], [0 for _ in meterial_durations]
         
         min_single_text_duration, max_text_duration = cfg.min_single_text_duration, cfg.max_text_duration
@@ -46,7 +46,6 @@ class TimeLine:
             else:
                 new_meterial_durations = meterial_durations
                 time_margins = [0 for _ in range(len(meterial_durations))]
-                node_state.node_summary.add_error(f"Check config, one of `is_use_beats` and `is_use_tts` must be true.")
         else:
             if music:
                 # get beats
@@ -57,7 +56,6 @@ class TimeLine:
             else:
                 new_meterial_durations = meterial_durations
                 time_margins = [0 for _ in range(len(meterial_durations))]
-                node_state.node_summary.add_error(f"Check config, one of `is_use_beats` and `is_use_tts` must be true.")
 
         # edit speed 
         speeds = [1.0 if old_duration > new_duration or _type == 'img' else old_duration / new_duration for _type, old_duration, new_duration in zip(types, meterial_durations, new_meterial_durations)]
@@ -355,8 +353,8 @@ class PlanTimelineProNode(BaseNode):
         ),
         node_id="plan_timeline_pro",
         node_kind="plan_timeline",
-        require_prior_kind=["split_shots", "speech_rough_cut", "group_clips", "generate_script", "tts", "music_rec"],
-        default_require_prior_kind=["split_shots", "group_clips", "generate_script", "tts", "music_rec"],
+        require_prior_kind=["split_shots", "speech_rough_cut", "group_clips", "generate_ai_transition", "generate_script", "tts", "music_rec"],
+        default_require_prior_kind=["split_shots", "group_clips", "generate_ai_transition", "generate_script", "tts", "music_rec"],
         next_available_node=["render_video"],
     )
     
@@ -376,10 +374,10 @@ class PlanTimelineProNode(BaseNode):
         return await self.process(node_state, inputs)
 
     async def process(self, node_state: NodeState,  inputs: Dict[str, Any]) -> Any:
-
         music = inputs.pop("music", None)
         tts_res = inputs.pop("tts_res", None)
         is_speech_rough_cut = inputs.get("is_speech_rough_cut", False)
+        is_ai_transition = inputs.get("is_ai_transition", False)
 
         # Processing clip durations
         music_offset, new_meterial_durations, speeds, time_margins = self.timeline_client.edit_meterial_timeline(
@@ -395,6 +393,7 @@ class PlanTimelineProNode(BaseNode):
             title_clip_duration=inputs.get('title_clip_duration', 0),
             is_on_beats=inputs.get('is_on_beats', False),
             is_speech_rough_cut=is_speech_rough_cut,
+            is_ai_transition=is_ai_transition,
         )
 
         # Processing tts durations
@@ -439,7 +438,7 @@ class PlanTimelineProNode(BaseNode):
             'text_clip_maps': text_clip_maps,
             'tts_start_timestamps': tts_start_timestamps,
         }
-    
+
     def _combine_tool_outputs(self, node_state, outputs):
         """
         Change output format.
@@ -560,11 +559,13 @@ class PlanTimelineProNode(BaseNode):
         
         split_shots = inputs.get("split_shots", {})
         group_clips = inputs.get("group_clips", {})
+        generate_ai_transition = inputs.get("generate_ai_transition", {})
         generate_script = inputs.get("generate_script", {})
-        music = inputs.get("music_rec", None).get("bgm", {})
+        music = (inputs.get("music_rec") or {}).get("bgm", {})
         tts_res = inputs.get("tts", {}).get("voiceover", [])
         use_beats = inputs.get("use_beats", False)
         is_speech_rough_cut = inputs.get("is_speech_rough_cut", False)
+        is_ai_transition = inputs.get("is_ai_transition", False)
         speech_rough_cut = inputs.get("speech_rough_cut")
         texts, types = [], []
         clips, clip_ids, clip_idxes = [], [], []
@@ -573,6 +574,85 @@ class PlanTimelineProNode(BaseNode):
         text_group_ids, text_unit_ids, text_index_in_group = [], [], []
         text_indices_map = {}
         tts_group_ids, voiceover_ids, tts_durations, tts_paths = [], [], [], []
+
+        if is_ai_transition is True:
+            transition_info = generate_ai_transition.get("transition_info", {})
+            groups = generate_ai_transition.get("groups", [])
+            image_duration_ms = int(inputs.get("image_duration_ms", 3000) or 3000)
+            start_times, fps, sizes = [], [], []
+            clips_by_clip_id = {clip.get("clip_id", ""): clip for clip in split_shots.get("clips", [])}
+
+            for group in groups:
+                group_id = group.get("group_id", "")
+                for clip_id in group.get("clip_ids", []) or []:
+                    if isinstance(clip_id, str) and clip_id.startswith("transition_"):
+                        transition_clip = transition_info.get(clip_id, {})
+                        transition_source_ref = transition_clip.get("source_ref", {})
+                        transition_duration = int(transition_source_ref.get("duration_ms", 0) or 0)
+                        if transition_duration <= 0:
+                            continue
+
+                        clip_ids.append(clip_id)
+                        clip_group_ids.append(group_id)
+                        clips.append(transition_clip.get("path", ""))
+                        types.append("video")
+                        clip_durations.append(transition_duration)
+                        start_times.append(0)
+                        fps.append(transition_clip.get("fps", 0))
+                        sizes.append([
+                            transition_source_ref.get("width", 576),
+                            transition_source_ref.get("height", 1024),
+                        ])
+                        continue
+
+                    clip_info = clips_by_clip_id.get(clip_id, {})
+                    if not clip_info:
+                        continue
+
+                    clip_source_ref = clip_info.get("source_ref", {})
+                    clip_kind = clip_info.get("kind", "")
+                    clip_duration = image_duration_ms if clip_kind == "image" else int(clip_source_ref.get("duration", 0) or 0)
+                    if clip_duration <= 0:
+                        continue
+
+                    clip_ids.append(clip_id)
+                    clip_group_ids.append(group_id)
+                    clips.append(clip_info.get("path", ""))
+                    types.append(clip_kind)
+                    clip_durations.append(clip_duration)
+                    start_times.append(0 if clip_kind == "image" else int(clip_source_ref.get("start", 0) or 0))
+                    fps.append(clip_info.get("fps", None))
+                    sizes.append([
+                        clip_source_ref.get("width", 576),
+                        clip_source_ref.get("height", 1024),
+                    ])
+
+            return {
+                'is_ai_transition': True,
+                'types': types,
+                'texts': [],
+                'text_unit_ids': [],
+                'text_group_ids': [],
+                'text_index_in_group': [],
+                'clips': clips,
+                'clip_ids': clip_ids,
+                'clip_group_ids': clip_group_ids,
+                'fps': fps,
+                'sizes': sizes,
+                'clip_durations': clip_durations,
+                'start_times': start_times,
+                'text_indices_map': {},
+                'music': music,
+                'tts_res': [],
+                'tts_group_ids': [],
+                'voiceover_ids': [],
+                'tts_durations': [],
+                'tts_paths': [],
+                'is_on_beats': False,
+                'is_speech_rough_cut': False,
+                'speech_rough_cut': None,
+                'title_clip_duration': 0,
+            }
 
         if is_speech_rough_cut is True and speech_rough_cut is None:
             node_state.node_summary.add_error("The input clips are from speech rough cut, but no clips info is found in the input. Check whether the prior node `speech_rough_cut` output is correct.")

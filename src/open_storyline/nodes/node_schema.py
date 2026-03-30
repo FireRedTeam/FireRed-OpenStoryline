@@ -63,18 +63,18 @@ class SubtitleUnit(BaseModel):
     unit_id: str = Field(
         ...,
         description="Unique identifier for subtitle unit",
-        example="subtitle_0001"
+        examples=["subtitle_0001"],
     )
     index_in_group: int = Field(
         ...,
         ge=0,
         description="Sequential index within current group (starting from 0)",
-        example=0
+        examples=[0],
     )
     text: str = Field(
         ...,
         description="Text content of this subtitle unit",
-        example="The cat doesn't understand what KPI means"
+        examples=["The cat doesn't understand what KPI means"],
     )
 
 
@@ -83,17 +83,17 @@ class GroupClips(BaseModel):
     group_id: str = Field(
         ...,
         description="Unique identifier for the group",
-        example="group_0001"
+        examples=["group_0001"],
     )
     summary: str = Field(
         ...,
         description="Description of the group's visual style, emotional tone, or editing intent",
-        example="Start with the calmest, most healing shots to establish the mood."
+        examples=["Start with the calmest, most healing shots to establish the mood."],
     )
     clip_ids: List[str] = Field(
         ...,
         description="List of video clip IDs used in this group, arranged in playback order",
-        example=["clip_0003", "clip_0002"]
+        examples=[["clip_0003", "clip_0002"]],
     )
 
 
@@ -102,12 +102,12 @@ class GroupScript(BaseModel):
     group_id: str = Field(
         ...,
         description="Unique identifier for the group",
-        example="group_0001"
+        examples=["group_0001"],
     )
     raw_text: str = Field(
         ...,
         description="original script content for this group",
-        example="The cat doesn't understand what KPI means, the cat only knows the sun is shining today"
+        examples=["The cat doesn't understand what KPI means, the cat only knows the sun is shining today"],
     )
     subtitle_units: List = Field(
         ...,
@@ -305,7 +305,7 @@ class RecommendScriptTemplateInput(BaseInput):
         )
     ] = {}
     filter_exclude: Annotated[
-        Dict[str, List[Union[str]]],
+        Dict[str, List[str]],
         Field(
             description=(
                 "Negative filter conditions. Items matching these conditions will be excluded. "
@@ -369,7 +369,7 @@ class RecommendTransitionInput(BaseInput):
 class RecommendTransitionOutput(BaseInput):
     ...
 
-class AIGCTransitionInput(BaseInput):
+class GenerateAITransitionInput(BaseInput):
     mode: Literal["auto", "skip", "default"] = Field(
         default="auto",
         description=(
@@ -383,6 +383,35 @@ class AIGCTransitionInput(BaseInput):
         default="", 
         description="User prompt specifying the desired transition effect."
     )
+
+    duration: Annotated[
+        Optional[int],
+        Field(
+            default=None,
+            description=(
+                "Desired AI transition duration in seconds. "
+                "You can choose 6s or 10s for MiniMax-Hailuo-02 with 768P,"
+                "6s for MiniMax-Hailuo-02 with 1080P,"
+                "and only 5s for Alibaba's Wan"
+                "If omitted, the provider default is used."
+            ),
+        ),
+    ] = None
+
+    resolution: Annotated[
+        Optional[str],
+        Field(
+            default=None,
+            description=(
+                "Desired AI transition resolution."
+                "You can choose 480P / 720P or 1080P for Alibaba's wan2.2-kf2v-flash,"
+                "720P for Alibaba's wan2.2-kf2v-flash,"
+                "768P or 1080P for MiniMax-Hailuo-02 with duration 6s."
+                "768P for MiniMax-Hailuo-02 with duration 10s."
+                "If omitted, the provider default is used."
+            ),
+        ),
+    ] = None
 
 class RecommendTextInput(BaseInput):
     mode: Literal["auto", "skip", "default"] = Field(
@@ -409,6 +438,11 @@ class RecommendTextOutput(BaseInput):
 class PlanTimelineInput(BaseInput):
     use_beats: Annotated[bool, Field(default=True, description="Whether clip transitions should sync with BGM beats")]
     is_speech_rough_cut: Annotated[bool, Field(default=False, description="Whether the input clips are from speech rough cut, which affects the default timeline strategy selection")] 
+    is_ai_transition: Annotated[bool, Field(default=False, description="Whether to build a minimal AI transition timeline by concatenating clips in order without subtitles, voiceover, cutting, or speed changes")]
+    image_duration_ms: Annotated[int, Field(default=3000, description="Default duration for image clips in milliseconds when using the AI transition timeline branch")]
+
+class PlanTimelineAITransitionInput(BaseInput):
+    image_duration_ms: Annotated[int, Field(default=3000, description="Default duration for image clips in milliseconds")]
 
 class PlanTimelineOutput(BaseModel):
     tracks: List[TimelineTracks] = Field(default_factory=list, description="Timeline track collection")
@@ -477,4 +511,3 @@ class RenderVideoInput(BaseInput):
         default=1.0,
         description="Original video audio volume multiplier, range 0.0–3.0 (1.0 = default volume)"
     )]
-

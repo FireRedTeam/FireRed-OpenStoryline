@@ -83,12 +83,9 @@ Billing Dashboard: https://billing-cost.console.aliyun.com/home
 
 ## 4. TTS (Text-to-Speech) Configuration
 
-### Option 1: 302.ai (Not recommended)
 
-- **Service URL**: https://302.ai/product/detail/302ai-mmaudio-text-to-speech
-- **API Key Base url**：https://api.302.ai
 
-### Option 2: MiniMax (Recommended)
+### Option 1: MiniMax (Recommended)
 
 - **Service URL**: https://platform.minimaxi.com/docs/api-reference/speech-t2a-http
 - **API Key Base Url**: https://api.minimax.chat/v1/t2a_v2
@@ -98,7 +95,7 @@ Billing Dashboard: https://billing-cost.console.aliyun.com/home
    2. Visit: https://platform.minimax.io/user-center/basic-information/interface-key
    3. Obtain and save API Key
 
-### Option 3: Bytedance (Recommended)
+### Option 2: Bytedance (Recommended)
 1. Step 1: Enable Audio/Video Subtitle Generation Service
    Use the legacy page to find the audio/video subtitle generation service:
 
@@ -129,6 +126,31 @@ access_token = ""
 ```
 
 For detailed documentation, please refer to: https://www.volcengine.com/docs/6561/80909
+
+### Option 3: 302.ai (Alternative solutions)
+
+- **Service URL**: https://302.ai/product/detail/302ai-mmaudio-text-to-speech
+- **API Key Base url**：https://api.302.ai
+
+## 5. AI Transition Configuration
+
+**Before you start**: AI transitions trigger additional model calls. Transitions are generated clip by clip between adjacent segments, so the more clips you have and the finer the shot splitting is, the higher the number of calls will usually be. As a result, resource usage is typically **significantly higher** than standard copywriting or voiceover workflows.
+
+**Output quality note**: The current transition description is generated from the first and last frames of adjacent clips by a vision model, while clip ordering is determined by the language model. Final results can therefore vary depending on frame content, prompts, model versions, and service-side behavior. Some randomness is expected, and output may not match expectations every time.
+
+**Recommendation**: Start with a small test run, review the results, and then scale up if the quality and cost are acceptable. Please also check your **account balance** and **provider billing rules** in advance.
+
+### Option 1: MiniMax Hailuo
+
+1. In most cases, the API key you already use for MiniMax LLM or TTS services can also be used for Hailuo video generation. If you already have one, you can reuse it directly. If not, create one from the MiniMax API platform by following the official [Quick Start](https://platform.minimax.io/docs/guides/quickstart).
+
+2. You can use `MiniMax-Hailuo-02`, or check the official [Video Generation documentation](https://platform.minimax.io/docs/api-reference/video-generation-intro) for newer supported model names.
+
+### Option 2: Alibaba Cloud Wan
+
+1. In most cases, the API key you already use for Alibaba Cloud Model Studio LLM services can also be used for Wan video generation. If you already have one, you can reuse it directly. If not, follow the official guide to [get an API key](https://www.alibabacloud.com/help/en/model-studio/get-api-key).
+
+2. We recommend `wan2.2-kf2v-flash`, or you can check the official [first-and-last-frame image-to-video guide](https://www.alibabacloud.com/help/en/model-studio/image-to-video-first-and-last-frames-guide) for more supported model names and usage details.
 
 ## Important Notes
 

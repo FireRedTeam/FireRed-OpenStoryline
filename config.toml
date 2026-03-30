@@ -44,10 +44,10 @@ available_node_pkgs = [
     "open_storyline.nodes.core_nodes"
 ]
 available_nodes = [
-    "LoadMediaNode", "SearchMediaNode", "SplitShotsNode", "LocalASRNode", "SpeechRoughCutNode",
+    "LoadMediaNode", "SearchMediaNode", "SplitShotsNode", "LocalASRNode", "SpeechRoughCutNode", "GenerateAITransitionNode", 
     "UnderstandClipsNode", "FilterClipsNode", "GroupClipsNode", "GenerateScriptNode", "ScriptTemplateRecomendation",
     "GenerateVoiceoverNode", "SelectBGMNode", "RecommendTransitionNode", "RecommendTextNode",
-    "PlanTimelineProNode", "RenderVideoNode"
+    "PlanTimelineProNode", "PlanTimelineAITransitionNode", "RenderVideoNode"
 ]
 
 # =========== skills ==========
@@ -96,6 +96,18 @@ access_token = ""
 
 [generate_voiceover.providers.minimax]
 base_url = ""
+api_key = ""
+
+
+# ============= AI 转场生成 / AI transition generation ===================
+[generate_ai_transition]
+
+[generate_ai_transition.providers.dashscope] # 阿里通义万相 / Alibaba’s Tongyi Wanxiang (Wan) video model
+model_name = ""
+api_key = ""
+
+[generate_ai_transition.providers.minimax] # Minimax 海螺 / Hailuo
+model_name = ""
 api_key = ""
 
 

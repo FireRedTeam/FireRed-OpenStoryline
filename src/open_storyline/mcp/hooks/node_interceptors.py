@@ -395,41 +395,73 @@ class ToolInterceptor:
             raise
 
     @staticmethod
+    async def _inject_provider_config(
+        request,
+        handler,
+        *,
+        tool_name_keyword: str,
+        context_attr: str,
+        default_provider: str | None = None,
+    ):
+        try:
+            tool_name = str(getattr(request, "name", "") or "")
+            args = getattr(request, "args", None)
+
+            if tool_name_keyword not in tool_name or not isinstance(args, dict):
+                return await handler(request)
+
+            runtime = getattr(request, "runtime", None)
+            ctx = getattr(runtime, "context", None) if runtime else None
+            provider_cfg_all = getattr(ctx, context_attr, None) if ctx else None
+            if not isinstance(provider_cfg_all, dict):
+                return await handler(request)
+
+            provider = str(provider_cfg_all.get("provider") or "").strip().lower()
+            if not provider:
+                if default_provider:
+                    args.setdefault("provider", default_provider)
+                return await handler(request)
+
+            args.setdefault("provider", provider)
+
+            provider_cfg = provider_cfg_all.get(provider)
+            if isinstance(provider_cfg, dict):
+                for key, value in provider_cfg.items():
+                    if value is None:
+                        continue
+                    args.setdefault(key, str(value).strip())
+        except Exception as e:
+            logger.warning(f"Failed to inject provider config ({context_attr}): {e}")
+        return await handler(request)
+
+
+    @staticmethod
     async def inject_tts_config(request: MCPToolCallRequest, handler):
         """
         Interceptor: Injects runtime.context.tts_config parameters into request.args before invoking voiceover/TTS tools.
         - tts_config: {"provider": "bytedance", "bytedance": {...}, "azure": {...}, ...}
         """
-        try:
-            tool_name = str(getattr(request, "name", "") or "")
-            args = getattr(request, "args", None)
+        return await ToolInterceptor._inject_provider_config(
+            request,
+            handler,
+            tool_name_keyword="voiceover",
+            context_attr="tts_config",
+            default_provider="minimax",
+        )
 
-            if "voiceover" not in tool_name or not isinstance(args, dict):
-                return await handler(request)
-
-            runtime = getattr(request, "runtime", None)
-            ctx = getattr(runtime, "context", None) if runtime else None
-            tts_cfg = getattr(ctx, "tts_config", None) if ctx else None
-            if not isinstance(tts_cfg, dict):
-                return await handler(request)
-
-            provider = str(tts_cfg.get("provider") or "").strip().lower()
-
-            if not provider:
-                args.setdefault("provider", "302")
-                return await handler(request)
-
-            args.setdefault("provider", provider)
-
-            provider_cfg = tts_cfg.get(provider)
-            if isinstance(provider_cfg, dict):
-                for key, value in provider_cfg.items():
-                    if value is None:                        
-                        continue
-                    args.setdefault(key, str(value).strip())
-        except Exception as e:
-            logger.warning(f"Failed to inject TTS config: {e}")
-        return await handler(request)
+    @staticmethod
+    async def inject_ai_transition_config(request: MCPToolCallRequest, handler):
+        """
+        Interceptor: Injects runtime.context.ai_transition_config parameters into request.args
+        before invoking AI transition tools.
+        - ai_transition_config: {"provider": "dashscope", "dashscope": {...}, ...}
+        """
+        return await ToolInterceptor._inject_provider_config(
+            request,
+            handler,
+            tool_name_keyword="generate_ai_transition",
+            context_attr="ai_transition_config",
+        )
     
     @staticmethod
     async def inject_pexels_api_key(request: MCPToolCallRequest, handler):
