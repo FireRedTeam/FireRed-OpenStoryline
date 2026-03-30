@@ -1467,7 +1467,17 @@ class ChatUI {
     };
     dom.data = merged;
 
-    if (patch && patch.__progress_mode === "real") {
+    const shouldUseRealProgress =
+      !!(patch && patch.__progress_mode === "real") ||
+      !!(
+        patch &&
+        patch.state === "running" &&
+        typeof patch.progress === "number" &&
+        Number.isFinite(patch.progress) &&
+        patch.progress > 0
+      );
+
+    if (shouldUseRealProgress) {
       dom._progressMode = "real";
     }
 
@@ -2397,6 +2407,8 @@ class App {
 
     this.streaming = false;
     this.uploading = false;
+    this._recoveryPollTimer = 0;
+    this._recoveryPollInFlight = false;
 
     // 防止 “发送后到 assistant.start 前” 的短暂切换窗口
     this._switchLockUntilAssistantStart = false;
@@ -2610,6 +2622,177 @@ class App {
 
     this.sessionHistory = next;
     this._saveSessionHistory(this.sessionHistory);
+  }
+
+  _snapshotHistory(snapshot) {
+    return (snapshot && Array.isArray(snapshot.history)) ? snapshot.history : [];
+  }
+
+  _snapshotTurnRunning(snapshot) {
+    if (snapshot && typeof snapshot.turn_running === "boolean") {
+      return !!snapshot.turn_running;
+    }
+
+    return this._snapshotHistory(snapshot).some((item) => {
+      if (!item || item.role !== "tool") return false;
+      return String(item.state || "").toLowerCase() === "running";
+    });
+  }
+
+  _applySnapshotMeta(sessionId, snapshot) {
+    const sid = String(sessionId || snapshot?.session_id || "").trim();
+    if (!sid) return;
+
+    this.sessionId = sid;
+
+    const snapLang = snapshot && snapshot.lang;
+    if (!this._langWasStored && snapLang) {
+      this._setLang(snapLang, { persist: true, syncServer: false });
+    } else {
+      this._setLang(this.lang, { persist: false, syncServer: false });
+    }
+
+    this.applySnapshotLimits(snapshot);
+    this.applySnapshotModels(snapshot);
+    localStorage.setItem(SESSION_ID_KEY, sid);
+
+    this._upsertSessionHistoryFromSnapshot(sid, snapshot);
+    this._renderSessionHistory(sid);
+
+    this.setDeveloperMode(!!snapshot?.developer_mode);
+    this.ui.setSessionId(sid);
+  }
+
+  _syncStreamingStateFromSnapshot(snapshot) {
+    const turnRunning = this._snapshotTurnRunning(snapshot);
+    this.streaming = turnRunning;
+    if (!turnRunning) this.canceling = false;
+    this._updateComposerDisabledState();
+  }
+
+  _replaySnapshotHistory(snapshot) {
+    this.ui.clearAll();
+
+    const history = this._snapshotHistory(snapshot);
+    for (const item of history) {
+      if (item.role === "user") {
+        this.ui.appendUserMessage(item.content || "", item.attachments || []);
+      } else if (item.role === "assistant") {
+        this.ui.startAssistantMessage({placeholder: false});
+        this.ui.finalizeAssistant(item.content || "");
+      } else if (item.role === "tool") {
+        const patch = {
+          server: item.server,
+          name: item.name,
+          state: item.state,
+          args: item.args,
+          progress: item.progress,
+          message: item.message,
+          summary: item.summary,
+        };
+        if (String(item.state || "").toLowerCase() === "running") {
+          patch.__progress_mode = "real";
+        }
+        this.ui.upsertToolCard(item.tool_call_id, patch);
+
+        if (item.summary != null) {
+          this.ui.appendDevSummary(item.tool_call_id, {
+            server: item.server,
+            name: item.name,
+            summary: item.summary,
+            is_error: item.state === "error",
+          });
+        }
+      }
+    }
+  }
+
+  _syncToolCardsFromSnapshot(snapshot) {
+    const history = this._snapshotHistory(snapshot);
+    for (const item of history) {
+      if (!item || item.role !== "tool") continue;
+
+      const patch = {
+        server: item.server,
+        name: item.name,
+        state: item.state,
+        args: item.args,
+        progress: item.progress,
+        message: item.message,
+        summary: item.summary,
+      };
+      if (String(item.state || "").toLowerCase() === "running") {
+        patch.__progress_mode = "real";
+      }
+      this.ui.upsertToolCard(item.tool_call_id, patch);
+
+      if (item.summary != null) {
+        this.ui.appendDevSummary(item.tool_call_id, {
+          server: item.server,
+          name: item.name,
+          summary: item.summary,
+          is_error: item.state === "error",
+        });
+      }
+    }
+  }
+
+  _applySnapshotToCurrentSession(snapshot, { replayHistory = false } = {}) {
+    if (!snapshot || typeof snapshot !== "object") return;
+    this._applySnapshotMeta(snapshot.session_id || this.sessionId, snapshot);
+    if (replayHistory) this._replaySnapshotHistory(snapshot);
+    this.setPending(snapshot.pending_media || []);
+    this._syncStreamingStateFromSnapshot(snapshot);
+  }
+
+  _stopRecoveryPoll() {
+    if (this._recoveryPollTimer) {
+      clearTimeout(this._recoveryPollTimer);
+      this._recoveryPollTimer = 0;
+    }
+    this._recoveryPollInFlight = false;
+  }
+
+  _scheduleRecoveryPoll(delayMs = 1000) {
+    if (this._recoveryPollTimer) return;
+    if (!this.sessionId) return;
+
+    this._recoveryPollTimer = setTimeout(() => {
+      this._recoveryPollTimer = 0;
+      void this._pollRecoverySnapshot();
+    }, delayMs);
+  }
+
+  async _pollRecoverySnapshot() {
+    if (this._recoveryPollInFlight) return;
+
+    const sid = String(this.sessionId || "").trim();
+    if (!sid) {
+      this._stopRecoveryPoll();
+      return;
+    }
+
+    this._recoveryPollInFlight = true;
+    try {
+      const snapshot = await this.api.getSession(sid);
+      if (String(this.sessionId || "").trim() !== sid) return;
+
+      this._applySnapshotToCurrentSession(snapshot, { replayHistory: false });
+      this._syncToolCardsFromSnapshot(snapshot);
+
+      if (this._snapshotTurnRunning(snapshot)) {
+        this._scheduleRecoveryPoll(1000);
+      } else {
+        this._applySnapshotToCurrentSession(snapshot, { replayHistory: true });
+        this._stopRecoveryPoll();
+      }
+    } catch (e) {
+      if (String(this.sessionId || "").trim() === sid) {
+        this._scheduleRecoveryPoll(1500);
+      }
+    } finally {
+      this._recoveryPollInFlight = false;
+    }
   }
 
   _removeSessionFromHistory(sessionId) {
@@ -3721,8 +3904,10 @@ class App {
   }
 
   async useSession(sessionId, snapshot) {
+    this._stopRecoveryPoll();
     this.streaming = false;
     this.uploading = false;
+    this.canceling = false;
     this._updateComposerDisabledState();
 
     this.sessionId = sessionId;
@@ -3737,52 +3922,7 @@ class App {
     // 切会话：清掉上一会话的本地缓存 URL，避免泄漏
     this.clearLocalObjectUrls();
 
-    // 从后端 snapshot 读取 limits（按素材个数限制/分片大小等）
-    this.applySnapshotLimits(snapshot);
-    this.applySnapshotModels(snapshot);
-
-    localStorage.setItem(SESSION_ID_KEY, sessionId);
-
-    // 会话列表：更新/插入并重新渲染
-    this._upsertSessionHistoryFromSnapshot(sessionId, snapshot);
-    this._renderSessionHistory(sessionId);
-
-    this.setDeveloperMode(!!snapshot.developer_mode);
-
-    this.ui.setSessionId(sessionId);
-    this.ui.clearAll();
-
-    // 回放 history
-    const history = snapshot.history || [];
-    for (const item of history) {
-      if (item.role === "user") {
-        this.ui.appendUserMessage(item.content || "", item.attachments || []);
-      } else if (item.role === "assistant") {
-        this.ui.startAssistantMessage({placeholder: false});
-        this.ui.finalizeAssistant(item.content || "");
-      } else if (item.role === "tool") {
-        this.ui.upsertToolCard(item.tool_call_id, {
-          server: item.server,
-          name: item.name,
-          state: item.state,
-          args: item.args,
-          progress: item.progress,
-          message: item.message,
-          summary: item.summary,
-        });
-
-        if (item.summary != null) {
-          this.ui.appendDevSummary(item.tool_call_id, {
-            server: item.server,
-            name: item.name,
-            summary: item.summary,
-            is_error: item.state === "error",
-          });
-        }
-      }
-    }
-
-    this.setPending(snapshot.pending_media || []);
+    this._applySnapshotToCurrentSession(snapshot, { replayHistory: true });
     this.connectWs();
 
     // 切换到会话时，让对应历史项轻微闪烁，增强反馈
@@ -3799,22 +3939,12 @@ class App {
   onWsEvent(evt) {
     const { type, data } = evt || {};
     if (type === "session.snapshot") {
-      // 一般用不上（useSession 已经回放了），但保留兼容
-      this.setDeveloperMode(!!data.developer_mode);
-      this.ui.setSessionId(data.session_id);
-      this.applySnapshotModels(data || {});
-
-      const serverLang = data && data.lang;
-      const sv = __osNormLang(serverLang);
-      if (sv && sv !== this.lang) {
-        if (this._langWasStored) {
-          this._pushLangToServer();
-        } else {
-          this._setLang(sv, { persist: true, syncServer: false });
-        }
+      this._applySnapshotToCurrentSession(data || {}, { replayHistory: true });
+      if (this._snapshotTurnRunning(data)) {
+        this._scheduleRecoveryPoll(1000);
+      } else {
+        this._stopRecoveryPoll();
       }
-
-      this.setPending(data.pending_media || []);
       return;
     }
 
@@ -3893,6 +4023,7 @@ class App {
     }
 
     if (type === "chat.cleared") {
+      this._stopRecoveryPoll();
       this._clearSwitchLock();
       this.streaming = false;
       this.canceling = false;

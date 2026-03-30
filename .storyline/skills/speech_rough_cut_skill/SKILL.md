@@ -1,6 +1,6 @@
 ---
 name: speech_rough_cut_skill
-description: 【SKILL】根据输入视频的音频信息进行粗剪，口播粗剪。
+description: 【WORKFLOW SKILL】根据输入视频的音频信息进行口播粗剪。Rough cut based on audio information from the input video for narration.
 ---
 
 # 角色定义 (Role)

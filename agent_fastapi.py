@@ -1293,6 +1293,7 @@ class ChatSession:
             "developer_mode": self.developer_mode,
             "pending_media": self.public_pending_media(),
             "history": self.history,
+            "turn_running": self.chat_lock.locked(),
             "limits": {
                 "max_upload_files_per_request": MAX_UPLOAD_FILES_PER_REQUEST,
                 "max_media_per_session": MAX_MEDIA_PER_SESSION,
@@ -2344,17 +2345,20 @@ async def ws_chat(ws: WebSocket, session_id: str):
                         sess.history.append(user_msg)
                         sess.lc_messages.append(HumanMessage(content=prompt))
 
-                        # if app.state.cfg.developer.developer_mode:
-                        #     print("[LLM_CTX]", session_id, sess.lc_messages)
+                        if app.state.cfg.developer.print_context:
+                            print("[LLM_CTX]", session_id, sess.lc_messages, flush=True)
+
+                        client_attached = True
 
                         # 2.2 ack：让前端更新 pending + 插入 user 消息（前端也可本地先插入）
-                        await ws_send(ws, "chat.user", {
+                        if not await ws_send(ws, "chat.user", {
                             "text": prompt,
                             "attachments": attachments_public,
                             "pending_media": sess.public_pending_media(),
                             "llm_model_key": sess.chat_model_key,
                             "vlm_model_key": sess.vlm_model_key,
-                        })
+                        }):
+                            client_attached = False
 
                         # 2.3 建立“单通道事件队列”，确保 ws.send_json 不会并发冲突
                         loop = asyncio.get_running_loop()
@@ -2406,25 +2410,19 @@ async def ws_chat(ws: WebSocket, session_id: str):
                                 logger.error(_format_exc(e))
 
 
-                        async def safe_send(type_: str, data: Any = None) -> bool:
-                            try:
-                                await ws_send(ws, type_, data)
-                                return True
-                            except WebSocketDisconnect:
+                        async def emit_turn_event(type_: str, data: Any = None) -> bool:
+                            nonlocal client_attached
+                            if not client_attached:
                                 return False
-                            except RuntimeError as e:
-                                # starlette: Cannot call "send" once a close message has been sent.
-                                if 'Cannot call "send" once a close message has been sent.' in str(e):
-                                    return False
-                                raise
-                            except Exception as e:
-                                # uvicorn: ClientDisconnected（不同版本类路径不稳定，用类名兜底）
-                                if e.__class__.__name__ == "ClientDisconnected":
-                                    return False
-                                raise
+
+                            # 前端断开后只停止推送，不中断当前 turn 的执行与状态提交。
+                            ok = await ws_send(ws, type_, data)
+                            if not ok:
+                                client_attached = False
+                            return ok
+
                         # turn 开始（前端可禁用发送按钮/显示占位）
-                        if not await ws_send(ws, "assistant.start", {}):
-                            return
+                        await emit_turn_event("assistant.start", {})
 
                         # 当前 assistant 分段缓冲：用于在 tool_start 到来前“封口”
                         seg_text = ""
@@ -2438,8 +2436,7 @@ async def ws_chat(ws: WebSocket, session_id: str):
                             nonlocal seg_text, seg_ts
 
                             if send_flush_event:
-                                if not await ws_send(ws, "assistant.flush", {}):
-                                    return
+                                await emit_turn_event("assistant.flush", {})
 
                             text = (seg_text or "").strip()
                             if text:
@@ -2682,7 +2679,7 @@ async def ws_chat(ws: WebSocket, session_id: str):
 
                                         # 推送 tool.end，确保前端停止 spinner
                                         for rec in cancelled_tool_recs:
-                                            await ws_send(ws, "tool.end", {
+                                            await emit_turn_event("tool.end", {
                                                 "tool_call_id": rec["tool_call_id"],
                                                 "server": rec["server"],
                                                 "name": rec["name"],
@@ -2716,7 +2713,7 @@ async def ws_chat(ws: WebSocket, session_id: str):
 
 
                                         # ★打断：只发 assistant.end，带 interrupted=true
-                                        await ws_send(ws, "assistant.end", {"text": interrupted_text, "interrupted": True})
+                                        await emit_turn_event("assistant.end", {"text": interrupted_text, "interrupted": True})
 
                                         sess.cancel_event.clear()
                                         break
@@ -2730,8 +2727,7 @@ async def ws_chat(ws: WebSocket, session_id: str):
                                             if seg_ts is None:
                                                 seg_ts = time.time()
                                             seg_text += delta
-                                            if not await ws_send(ws, "assistant.delta", {"delta": delta}):
-                                                raise WebSocketDisconnect()
+                                            await emit_turn_event("assistant.delta", {"delta": delta})
                                         continue
 
                                     if kind == "mcp":
@@ -2743,14 +2739,14 @@ async def ws_chat(ws: WebSocket, session_id: str):
                                         rec = sess.apply_tool_event(raw)
                                         if rec:
                                             if raw["type"] == "tool_start":
-                                                await ws_send(ws, "tool.start", {
+                                                await emit_turn_event("tool.start", {
                                                     "tool_call_id": rec["tool_call_id"],
                                                     "server": rec["server"],
                                                     "name": rec["name"],
                                                     "args": rec["args"],
                                                 })
                                             elif raw["type"] == "tool_progress":
-                                                await ws_send(ws, "tool.progress", {
+                                                await emit_turn_event("tool.progress", {
                                                     "tool_call_id": rec["tool_call_id"],
                                                     "server": rec["server"],
                                                     "name": rec["name"],
@@ -2758,7 +2754,7 @@ async def ws_chat(ws: WebSocket, session_id: str):
                                                     "message": rec["message"],
                                                 })
                                             elif raw["type"] == "tool_end":
-                                                await ws_send(ws, "tool.end", {
+                                                await emit_turn_event("tool.end", {
                                                     "tool_call_id": rec["tool_call_id"],
                                                     "server": rec["server"],
                                                     "name": rec["name"],
@@ -2781,8 +2777,7 @@ async def ws_chat(ws: WebSocket, session_id: str):
                                         if new_messages:
                                             sess.lc_messages.extend(new_messages)
 
-                                        if not await ws_send(ws, "assistant.end", {"text": final_text}):
-                                            return
+                                        await emit_turn_event("assistant.end", {"text": final_text})
                                         break
 
                                     if kind == "agent.error":
@@ -2803,7 +2798,7 @@ async def ws_chat(ws: WebSocket, session_id: str):
                                             sess.lc_messages.extend(new_messages)
 
                                         # ★ 真异常：只发 error（并带 partial_text 让前端结束当前气泡）
-                                        await ws_send(ws, "error", {"message": err_text, "partial_text": partial})
+                                        await emit_turn_event("error", {"message": err_text, "partial_text": partial})
                                         break
                         
                         except WebSocketDisconnect:
@@ -2815,7 +2810,7 @@ async def ws_chat(ws: WebSocket, session_id: str):
                             # 如果已经走了打断收尾，别再发 error（避免“打断=报错”）
                             if was_interrupted:
                                 return
-                            await ws_send(ws, "error", {"message": f"{type(e).__name__}: {e}", "partial_text": (seg_text or "").strip()})
+                            await emit_turn_event("error", {"message": f"{type(e).__name__}: {e}", "partial_text": (seg_text or "").strip()})
                             logger.error(_format_exc(e))
                             return
                         finally:
@@ -2833,11 +2828,14 @@ async def ws_chat(ws: WebSocket, session_id: str):
                                     debug_traceback_print(app.state.cfg)
                                     pass
                                 except asyncio.CancelledError:
-                                    debug_traceback_print(app.state.cfg)
                                     pass
                                 except Exception:
                                     debug_traceback_print(app.state.cfg)
                                     pass
+
+                        # 当前 ws 已断开：turn 已经完整收尾，结束旧 handler，等待前端重连。
+                        if not client_attached:
+                            return
                 finally:
                     try:
                         CHAT_TURN_SEM.release()

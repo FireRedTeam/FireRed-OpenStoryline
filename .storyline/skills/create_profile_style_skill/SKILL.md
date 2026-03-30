@@ -1,6 +1,6 @@
 ---
 name: create_profile_style_skill
-description: 【SKILL】分析当前剪辑逻辑与风格，总结并生成一个新的可复用 Skill 文件，存入剪辑技能库。
+description: 【META SKILL】分析当前剪辑逻辑与风格，总结并生成一个新的可复用 Skill 文件，存入剪辑技能库。Analyze the current editing logic and style, summarize and generate a new reusable Skill file, and store it in the editing skill library.
 version: 1.0.0
 author: User_Agent_Architect
 tags: [meta-skill, workflow, writing, file-system]
@@ -35,7 +35,7 @@ tags: [meta-skill, workflow, writing, file-system]
     ```markdown
     ---
     name: {用户定义的名称}
-    description: 【SKILL】基于 {日期} 总结的 {风格关键词} 剪辑风格
+    description: 【WORKFLOW SKILL】基于 {日期} 总结的 {风格关键词} 剪辑风格
     version: 基于对话进行版本管理
     author: 用户
     tags: [相关的tag-list]

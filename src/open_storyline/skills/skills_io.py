@@ -9,7 +9,7 @@ from langchain_openai import ChatOpenAI
 from langchain.messages import HumanMessage
 
 async def load_skills(
-    skill_dir: str=".storyline/skills"
+    skill_dir: str | Path =".storyline/skills"
 ):
     # Discover skills
     manager = SkillManager(skill_dir=skill_dir)
