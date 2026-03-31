@@ -2371,11 +2371,26 @@ async def ws_chat(ws: WebSocket, session_id: str):
 
                         new_messages: List[BaseMessage] = []
 
+                        # Merge multiple SystemMessages into one to support LLMs
+                        # that do not allow more than one system message.
+                        _system_parts: List[str] = []
+                        _non_system: List[BaseMessage] = []
+                        for _m in sess.lc_messages:
+                            if isinstance(_m, SystemMessage):
+                                _system_parts.append(
+                                    _m.content if isinstance(_m.content, str) else str(_m.content)
+                                )
+                            else:
+                                _non_system.append(_m)
+                        _merged_messages: List[BaseMessage] = (
+                            [SystemMessage(content="\n\n".join(_system_parts))] if _system_parts else []
+                        ) + _non_system
+
                         async def pump_agent():
                             nonlocal new_messages
                             try:
                                 stream = sess.agent.astream(
-                                    {"messages": sess.lc_messages},
+                                    {"messages": _merged_messages},
                                     context=sess.client_context,
                                     stream_mode=["messages", "updates"],
                                 )
