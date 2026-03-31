@@ -368,10 +368,17 @@ def _serialize_lc_message(msg: BaseMessage) -> Dict[str, Any]:
         return payload
     if isinstance(msg, AIMessage):
         ak = getattr(msg, "additional_kwargs", None) or {}
+        tc = getattr(msg, "tool_calls", None) or []
+        if not isinstance(tc, list):
+            tc = []
+        tc = _to_json_safe(tc)
+        if not isinstance(tc, list):
+            tc = []
         return {
             "type": "ai",
             "content": _to_json_safe(msg.content),
             "additional_kwargs": _to_json_safe(ak),
+            "tool_calls": tc,
         }
     return {
         "type": "unknown",
@@ -409,13 +416,20 @@ def _deserialize_lc_message(data: Dict[str, Any]) -> Optional[BaseMessage]:
         ak = data.get("additional_kwargs")
         if not isinstance(ak, dict):
             ak = {}
+        tc_explicit = data.get("tool_calls")
+        if isinstance(tc_explicit, list):
+            tool_calls = tc_explicit
+        else:
+            tool_calls = ak.get("tool_calls")
+        if not isinstance(tool_calls, list):
+            tool_calls = []
+        if tool_calls:
+            ak = dict(ak)
+            ak["tool_calls"] = tool_calls
         # Some providers (and langchain-core versions) require tool calls to be present
         # on the AIMessage object (not only inside additional_kwargs) in order to
         # produce a valid OpenAI-style messages list. Without this, ToolMessage
         # may become an "orphan" and providers will reject the request.
-        tool_calls = ak.get("tool_calls")
-        if not isinstance(tool_calls, list):
-            tool_calls = []
         try:
             return AIMessage(content=content, additional_kwargs=ak, tool_calls=tool_calls)  # type: ignore[arg-type]
         except TypeError:
@@ -1450,23 +1464,39 @@ class ChatSession:
         self._attach_stats_msg_idx = 1
 
     def _close_unfinished_tool_calls_in_lc_messages(self) -> None:
-        ai_ids: Set[str] = set()
-        result_ids: Set[str] = set()
-        for m in (self.lc_messages or []):
-            if isinstance(m, AIMessage):
-                ai_ids |= _tool_call_ids_from_ai_message_for_state(m)
-            elif isinstance(m, ToolMessage):
-                tcid = getattr(m, "tool_call_id", None)
-                if tcid:
-                    result_ids.add(str(tcid))
-
-        pending = sorted(ai_ids - result_ids)
-        if not pending:
-            return
-
+        msgs_in: List[BaseMessage] = [m for m in (self.lc_messages or []) if isinstance(m, BaseMessage)]
+        out: List[BaseMessage] = []
+        i = 0
+        n = len(msgs_in)
         cancelled_content = json.dumps({"cancelled": True, "cancelled_by_restart": True}, ensure_ascii=False)
-        for tcid in pending:
-            self.lc_messages.append(ToolMessage(content=cancelled_content, tool_call_id=str(tcid)))
+
+        while i < n:
+            m = msgs_in[i]
+            if not isinstance(m, AIMessage):
+                out.append(m)
+                i += 1
+                continue
+
+            out.append(m)
+            expected_ids = _tool_call_ids_from_ai_message_for_state(m)
+            responded_ids: Set[str] = set()
+            i += 1
+
+            # Preserve valid contiguous ToolMessages for this AI block.
+            while i < n and isinstance(msgs_in[i], ToolMessage):
+                tm = msgs_in[i]
+                tcid = str(getattr(tm, "tool_call_id", "") or "").strip()
+                if tcid and (tcid in expected_ids) and (tcid not in responded_ids):
+                    responded_ids.add(tcid)
+                    out.append(tm)
+                i += 1
+
+            # Inject cancelled results right after the originating AI block.
+            missing = sorted(expected_ids - responded_ids)
+            for tcid in missing:
+                out.append(ToolMessage(content=cancelled_content, tool_call_id=str(tcid)))
+
+        self.lc_messages = out
 
     def _sanitize_tool_protocol_in_lc_messages(self) -> None:
         """
@@ -1476,13 +1506,14 @@ class ChatSession:
         providers may reject requests with 400. We drop orphan ToolMessages here.
         """
         msgs_in: List[BaseMessage] = [m for m in (self.lc_messages or []) if isinstance(m, BaseMessage)]
+        msgs_out: List[BaseMessage] = []
         pending_ids: Set[str] = set()
         responded_ids: Set[str] = set()
-        msgs_out: List[BaseMessage] = []
 
         for m in msgs_in:
             if isinstance(m, AIMessage):
-                pending_ids |= _tool_call_ids_from_ai_message_for_state(m)
+                pending_ids = _tool_call_ids_from_ai_message_for_state(m)
+                responded_ids = set()
                 msgs_out.append(m)
                 continue
             if isinstance(m, ToolMessage):
@@ -1492,6 +1523,8 @@ class ChatSession:
                     msgs_out.append(m)
                 # else: drop orphan/duplicate tool message
                 continue
+            pending_ids = set()
+            responded_ids = set()
             msgs_out.append(m)
 
         self.lc_messages = msgs_out
@@ -1574,8 +1607,8 @@ class ChatSession:
         sess.tts_config = tts_cfg if isinstance(tts_cfg, dict) else {}
 
         sess._normalize_running_tool_records()
-        sess._sanitize_tool_protocol_in_lc_messages()
         sess._close_unfinished_tool_calls_in_lc_messages()
+        sess._sanitize_tool_protocol_in_lc_messages()
         sess._rebuild_tool_history_index()
         sess._ensure_lc_messages_invariants()
         return sess
