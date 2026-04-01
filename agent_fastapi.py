@@ -297,11 +297,24 @@ _SECRET_VALUE_PATTERNS = [
     re.compile(r"(?i)(?:api[_-]?key|access[_-]?token|refresh[_-]?token|authorization)\s*[:=]\s*[\"']?[A-Za-z0-9._\-+/=]{16,}[\"']?"),
 ]
 
+# Inline `key: value` / `key=value` in plain strings: dict recursion masks by field name,
+# but the same secret in a single string only saw _SECRET_VALUE_PATTERNS (often 16+ chars).
+# Match unambiguous credential field names with shorter values (exclude bare "token"/"password"
+# which would false-positive in natural language).
+_SECRET_INLINE_ASSIGNMENT_RE = re.compile(
+    r"(?i)(?:api[_-]?key|api[_-]?token|auth[_-]?token|access[_-]?token|"
+    r"client[_-]?secret|refresh[_-]?token|x-api-key|apikey|access[_-]?key|accesskey|"
+    r"pexels[_-]?api[_-]?key)\s*[:=]\s*[\"']?"
+    r"[A-Za-z0-9._\-+/=]{3,}"
+    r"[\"']?"
+)
+
 
 def _mask_secret_string(text: str) -> str:
     s = str(text or "")
     for pat in _SECRET_VALUE_PATTERNS:
         s = pat.sub(MASKED_SECRET, s)
+    s = _SECRET_INLINE_ASSIGNMENT_RE.sub(MASKED_SECRET, s)
     return s
 
 
@@ -398,6 +411,10 @@ def _deserialize_lc_message(data: Dict[str, Any]) -> Optional[BaseMessage]:
     if t == "tool":
         tcid = str(data.get("tool_call_id") or "").strip()
         if not tcid:
+            logger.warning(
+                "Persisted ToolMessage skipped: empty tool_call_id. "
+                "If the preceding AI turn had tool_calls, load will synthesize cancelled tool results."
+            )
             return None
         kwargs: Dict[str, Any] = {}
         ak = data.get("additional_kwargs")
