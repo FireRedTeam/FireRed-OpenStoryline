@@ -1232,6 +1232,10 @@ class MediaStore:
                     pass
 
 
+class SessionStateUnavailableError(Exception):
+    """session_state.json exists but cannot be read or parsed (I/O or JSON). Callers should map to 503, not 404."""
+
+
 class ChatSession:
     """
     一个 session 的全部状态：
@@ -1576,13 +1580,29 @@ class ChatSession:
             return None
         try:
             with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            if not isinstance(data, dict):
-                return None
-            sid_in_file = str(data.get("session_id") or "").strip()
-            if sid_in_file and sid_in_file != session_id:
-                return None
-        except Exception:
+                raw = f.read()
+            data = json.loads(raw)
+        except OSError as e:
+            logger.warning("session state read failed sid=%s path=%s err=%s", session_id, path, e)
+            raise SessionStateUnavailableError("read_error") from e
+        except json.JSONDecodeError as e:
+            logger.warning("session state json invalid sid=%s path=%s err=%s", session_id, path, e)
+            raise SessionStateUnavailableError("corrupt_json") from e
+
+        if not isinstance(data, dict):
+            logger.warning("session state not a dict sid=%s path=%s", session_id, path)
+            raise SessionStateUnavailableError("invalid_shape")
+
+        # Mismatch vs persisted session_id → not this resource (404). Do not use 503 here:
+        # 503 is reserved for read/parse failures (SessionStateUnavailableError).
+        sid_in_file = str(data.get("session_id") or "").strip()
+        if sid_in_file and sid_in_file != session_id:
+            logger.warning(
+                "session state session_id mismatch path=%s requested=%s file=%s (treating as not found)",
+                path,
+                session_id,
+                sid_in_file,
+            )
             return None
 
         sess = cls(session_id=session_id, cfg=cfg)
@@ -2077,7 +2097,10 @@ class SessionStore:
         if not _is_valid_session_id_hex(sid):
             return None
 
-        restored = ChatSession.load_from_state(sid, self.cfg)
+        try:
+            restored = ChatSession.load_from_state(sid, self.cfg)
+        except SessionStateUnavailableError:
+            raise
         if restored is None:
             return None
         try:
@@ -2093,7 +2116,10 @@ class SessionStore:
             return restored
 
     async def get_or_404(self, sid: str) -> ChatSession:
-        sess = await self.get(sid)
+        try:
+            sess = await self.get(sid)
+        except SessionStateUnavailableError as e:
+            raise HTTPException(status_code=503, detail="session state unavailable") from e
         if not sess:
             raise HTTPException(status_code=404, detail="session not found")
         return sess
@@ -2784,11 +2810,17 @@ async def ws_chat(ws: WebSocket, session_id: str):
         await ws.accept()
 
         store: SessionStore = app.state.sessions
-        sess = await store.get(session_id)
+        try:
+            sess = await store.get(session_id)
+        except SessionStateUnavailableError:
+            try:
+                await ws.close(code=1013, reason="session state unavailable")
+            except Exception:
+                pass
+            return
         if not sess:
             await ws.close(code=4404, reason="session not found")
             return
-        sess = await store.get_or_404(session_id)
 
         await ws_send(ws, "session.snapshot", sess.snapshot())
 
