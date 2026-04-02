@@ -21,7 +21,7 @@ class RecommendTransitionNode(BaseNode):
         node_kind="transition_rec",
         require_prior_kind=['group_clips'],
         default_require_prior_kind=[],
-        next_available_node=["plan_timeline"],
+        next_available_node=["plan_timeline_pro"],
     )
 
     input_schema = RecommendTransitionInput
@@ -71,7 +71,7 @@ class RecommendTextNode(BaseNode):
 
     def __init__(self, server_cfg: Settings) -> None:
         super().__init__(server_cfg)
-        self.text_filter = ElementFilter(json_path=server_cfg.recommend_text.font_info_path)
+        self.text_filter = ElementFilter(json_path=str(server_cfg.recommend_text.font_info_path))
 
     async def default_process(
         self,

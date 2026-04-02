@@ -322,6 +322,7 @@ class BaseNode(ABC):
                 'isError': False
             }
         except Exception as e:
+            node_state.node_summary.add_error(str(e), artifact_id=node_state.artifact_id)
             if self.server_cfg.developer.developer_mode:
                 traceback_info = ''.join(traceback.format_exception(e))
                 summary = {

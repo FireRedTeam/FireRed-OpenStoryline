@@ -176,7 +176,7 @@ def resolve_output_canvas_size(inputs: Dict[str, Any]) -> Tuple[int, int]:
     """
     Requirement:
       1) output aspect ratio decided by inputs
-      2) keep output <=1080 (consistent with media<=1080 + performance)
+      2) output max dimension px decided by inputs
     """
 
     # Adaptively select the canvas size based on the proportion of the size of the material.

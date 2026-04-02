@@ -48,6 +48,10 @@ if SRC_DIR not in sys.path:
 from open_storyline.agent import build_agent, ClientContext
 from open_storyline.utils.prompts import get_prompt
 from open_storyline.utils.media_handler import scan_media_dir
+from open_storyline.utils.ai_transition_cancel import (
+    clear_ai_transition_cancelled,
+    set_ai_transition_cancelled,
+)
 from open_storyline.config import load_settings, default_config_path
 from open_storyline.config import Settings
 from open_storyline.storage.agent_memory import ArtifactStore
@@ -79,6 +83,13 @@ def _s(x: Any) -> str:
 def _norm_url(u: Any) -> str:
     u = _s(u)
     return u.rstrip("/") if u else ""
+
+
+def _ai_transition_cancel_cache_root(cfg: Settings) -> Path:
+    cache_dir = Path(cfg.local_mcp_server.server_cache_dir)
+    if not cache_dir.is_absolute():
+        cache_dir = Path(ROOT_DIR) / cache_dir
+    return cache_dir
 
 MODEL_ENV_KEYS = {
     "llm": {
@@ -162,19 +173,35 @@ def _stable_dict_key(d: Optional[Dict[str, Any]]) -> str:
     except Exception:
         return str(d or {})
 
+def _parse_provider_runtime_config(service_cfg: Any, key_name: str) -> Dict[str, Any]:
+    cfg = service_cfg.get(key_name)
+    if not isinstance(cfg, dict):
+        return {}
+
+    provider = _s(cfg.get("provider")).lower()
+    if not provider:
+        return {}
+
+    provider_block = cfg.get(provider)
+    if not isinstance(provider_block, dict):
+        provider_block = {}
+
+    return {"provider": provider, provider: provider_block}
+
 def _parse_service_config(service_cfg: Any) -> Tuple[
     Optional[Dict[str, Any]],
     Optional[Dict[str, Any]],
     Dict[str, Any],
     Dict[str, Any],
+    Dict[str, Any],
     Optional[str]]:
     """
-    返回 (custom_llm, custom_vlm, tts_cfg, pexels, err)
+    返回 (custom_llm, custom_vlm, tts_cfg, ai_transition_cfg, pexels, err)
     - custom_llm/custom_vlm: {"model","base_url","api_key"} 或 None（允许只传 llm 或只传 vlm）
     - tts_cfg: dict（可能为空）
     """
     if not isinstance(service_cfg, dict):
-        return None, None, {}, {}, None
+        return None, None, {}, {}, {}, None
 
     # ---- custom models ----
     custom_llm = None
@@ -183,7 +210,7 @@ def _parse_service_config(service_cfg: Any) -> Tuple[
 
     if custom_models is not None:
         if not isinstance(custom_models, dict):
-            return None, None, {}, {}, "service_config.custom_models 必须是对象"
+            return None, None, {}, {}, {}, "service_config.custom_models 必须是对象"
 
         def _pick(m: Any, label: str) -> Tuple[Optional[Dict[str, str]], Optional[str]]:
             if m is None:
@@ -203,21 +230,16 @@ def _parse_service_config(service_cfg: Any) -> Tuple[
 
         custom_llm, err1 = _pick(custom_models.get("llm"), "llm")
         if err1:
-            return None, None, {}, {}, err1
+            return None, None, {}, {}, {}, err1
 
         custom_vlm, err2 = _pick(custom_models.get("vlm"), "vlm")
         if err2:
-            return None, None, {}, {}, err2
+            return None, None, {}, {}, {}, err2
 
-    # ---- tts ----
-    tts_cfg: Dict[str, Any] = {}
-    tts = service_cfg.get("tts")
-    if isinstance(tts, dict):
-        provider = (tts.get("provider") or "").strip().lower()
-        if provider:
-            provider_block = tts.get(provider)
-            tts_cfg = {"provider": provider, provider: provider_block}
-    
+    # ---- provider runtime config ----
+    tts_cfg = _parse_provider_runtime_config(service_cfg, "tts")
+    ai_transition_cfg = _parse_provider_runtime_config(service_cfg, "ai_transition")
+
     # ---- pexels ----
     pexels_cfg: Dict[str, Any] = {}
     search_media = service_cfg.get("search_media")
@@ -239,7 +261,7 @@ def _parse_service_config(service_cfg: Any) -> Tuple[
             api_key = _s(search_media.get("pexels_api_key") or search_media.get("pexels_api_key"))
             pexels_cfg = {"mode": mode, "api_key": api_key}
 
-    return custom_llm, custom_vlm, tts_cfg, pexels_cfg, None
+    return custom_llm, custom_vlm, tts_cfg, ai_transition_cfg, pexels_cfg, None
 
 def is_developer_mode(cfg: Settings) -> bool:
     try:
@@ -1088,6 +1110,7 @@ class ChatSession:
         self.custom_llm_config: Optional[Dict[str, Any]] = None
         self.custom_vlm_config: Optional[Dict[str, Any]] = None
         self.tts_config: Dict[str, Any] = {}
+        self.ai_transition_config: Dict[str, Any] = {}
         self._agent_build_key: Optional[Tuple[Any, ...]] = None
 
         self.pexels_key_mode: str = "default"   # "default" | "custom"
@@ -1171,7 +1194,7 @@ class ChatSession:
 
 
     def apply_service_config(self, service_cfg: Any) -> Tuple[bool, Optional[str]]:
-        llm, vlm, tts, pexels, err = _parse_service_config(service_cfg)
+        llm, vlm, tts, ai_transition, pexels, err = _parse_service_config(service_cfg)
         if err:
             return False, err
 
@@ -1183,6 +1206,9 @@ class ChatSession:
         # tts 允许为空；非空才覆盖
         if isinstance(tts, dict) and tts:
             self.tts_config = tts
+
+        if isinstance(ai_transition, dict) and ai_transition:
+            self.ai_transition_config = ai_transition
 
         # ---- pexels ----
         if isinstance(pexels, dict) and pexels:
@@ -1233,6 +1259,7 @@ class ChatSession:
                     ToolInterceptor.inject_media_content_before,
                     ToolInterceptor.save_media_content_after,
                     ToolInterceptor.inject_tts_config,
+                    ToolInterceptor.inject_ai_transition_config,
                     ToolInterceptor.inject_pexels_api_key,
                 ],
                 llm_override=llm_override,
@@ -1251,6 +1278,7 @@ class ChatSession:
                 chat_model_key=self.chat_model_key,
                 vlm_model_key=self.vlm_model_key,
                 tts_config=(self.tts_config or None),
+                ai_transition_config=(self.ai_transition_config or None),
                 pexels_api_key=None,
                 lang=self.lang,
             )
@@ -1258,6 +1286,7 @@ class ChatSession:
             self.client_context.chat_model_key = self.chat_model_key
             self.client_context.vlm_model_key = self.vlm_model_key
             self.client_context.tts_config = (self.tts_config or None)
+            self.client_context.ai_transition_config = (self.ai_transition_config or None)
             self.client_context.lang = self.lang
 
         # ---- resolve pexels_api_key for runtime context ----
@@ -1564,10 +1593,49 @@ _TTS_UI_SECRET_KEYS = {
     "accesskey",
 }
 
+_PROVIDER_UI_META_KEYS = {
+    "label",
+    "name",
+    "display_name",
+}
+
+_PROVIDER_UI_LABEL_OVERRIDES = {
+    "302": "302.AI",
+    "bytedance": "字节跳动 ByteDance",
+    "dashscope": "阿里万相 Wan",
+}
+
+_PROVIDER_UI_LABEL_OVERRIDES_BY_SECTION = {
+    "generate_voiceover": {
+        "minimax": "MiniMax",
+    },
+    "generate_ai_transition": {
+        "minimax": "MiniMax 海螺 (Hailuo)",
+    },
+}
+
 def _is_secret_field_name(k: str) -> bool:
     if str(k or "").strip().lower() in _TTS_UI_SECRET_KEYS:
         return True
     return False
+
+def _get_provider_ui_label(section_name: str, provider: str, provider_cfg: Any) -> str:
+    if isinstance(provider_cfg, dict):
+        explicit_label = _s(
+            provider_cfg.get("label")
+            or provider_cfg.get("display_name")
+            or provider_cfg.get("name")
+        )
+        if explicit_label:
+            return explicit_label
+
+    section_key = _s(section_name)
+    provider_key = _s(provider).lower()
+    section_overrides = _PROVIDER_UI_LABEL_OVERRIDES_BY_SECTION.get(section_key, {})
+    if provider_key in section_overrides:
+        return section_overrides[provider_key]
+
+    return _PROVIDER_UI_LABEL_OVERRIDES.get(provider_key, _s(provider))
 
 def _read_config_toml(path: str) -> dict:
     if tomllib is None:
@@ -1595,7 +1663,7 @@ def _normalize_field_item(item) -> dict | None:
     """
     item 支持：
     - "uid"
-    - { key="uid", label="UID", required=true, secret=false, placeholder="..." }
+    - { key="uid", label="UID", secret=false, placeholder="..." }
     """
     if isinstance(item, str):
         key = item.strip()
@@ -1607,24 +1675,7 @@ def _normalize_field_item(item) -> dict | None:
         }
     return None
 
-def _build_provider_schema(provider: str, label: str | None, fields: list[dict]) -> dict:
-    seen = set()
-    out = []
-    for f in fields:
-        k = str(f.get("key") or "").strip()
-        if not k or k in seen:
-            continue
-        seen.add(k)
-        out.append({
-            "key": k,
-            "label": f.get("label") or k,
-            "placeholder": f.get("placeholder") or f.get("label") or k,
-            "required": bool(f.get("required", False)),
-            "secret": bool(f.get("secret", False)),
-        })
-    return {"provider": provider, "label": label or provider, "fields": out}
-
-def _build_tts_ui_schema_from_config(config_path: str) -> dict:
+def _build_provider_ui_schema_from_config(config_path: str, section_name: str) -> dict:
     """
     返回：
     {
@@ -1635,22 +1686,43 @@ def _build_tts_ui_schema_from_config(config_path: str) -> dict:
     }
     """
     cfg = _read_config_toml(config_path)
-    tts = cfg.get("generate_voiceover", {})
+    tts = cfg.get(section_name, {})
 
     providers_out: list[dict] = []
 
-    # 格式：[tts.providers.<provider>]
+    # 格式：[<node>.providers.<provider>]
     providers = tts.get("providers")
     if isinstance(providers, dict):
         for provider, provider_cfg in providers.items():
             fields: list[dict] = []  
-            label = str(provider_cfg.get("label") or provider_cfg.get("name") or provider)
+            label = _get_provider_ui_label(section_name, provider, provider_cfg)
             for key in provider_cfg.keys():
-                f = _normalize_field_item(str(key))
+                key = str(key).strip()
+                if not key or key.lower() in _PROVIDER_UI_META_KEYS:
+                    continue
+                f = _normalize_field_item(key)
                 if f:
                     fields.append(f)
 
-            providers_out.append(_build_provider_schema(provider, label, fields))
+            seen = set()
+            normalized_fields = []
+            for f in fields:
+                k = str(f.get("key") or "").strip()
+                if not k or k in seen:
+                    continue
+                seen.add(k)
+                normalized_fields.append({
+                    "key": k,
+                    "label": f.get("label") or k,
+                    "placeholder": f.get("placeholder") or f.get("label") or k,
+                    "secret": bool(f.get("secret", False)),
+                })
+
+            providers_out.append({
+                "provider": provider,
+                "label": label or provider,
+                "fields": normalized_fields,
+            })
 
     return {"providers": providers_out}
 
@@ -1672,7 +1744,12 @@ async def node_map():
 
 @api.get("/meta/tts")
 async def get_tts_ui_schema():
-    schema = _build_tts_ui_schema_from_config(default_config_path())
+    schema = _build_provider_ui_schema_from_config(default_config_path(), "generate_voiceover")
+    return JSONResponse(schema)
+
+@api.get("/meta/ai_transition")
+async def get_ai_transition_ui_schema():
+    schema = _build_provider_ui_schema_from_config(default_config_path(), "generate_ai_transition")
     return JSONResponse(schema)
 
 # -------------------------
@@ -1707,6 +1784,7 @@ async def clear_session_chat(session_id: str):
 
         sess.history = []
         sess._tool_history_index = {}
+        clear_ai_transition_cancelled(_ai_transition_cancel_cache_root(app.state.cfg), session_id)
     return JSONResponse({"ok": True})
 
 @api.post("/sessions/{session_id}/cancel")
@@ -1719,6 +1797,7 @@ async def cancel_session_turn(session_id: str):
     store: SessionStore = app.state.sessions
     sess = await store.get_or_404(session_id)
     sess.cancel_event.set()
+    set_ai_transition_cancelled(_ai_transition_cancel_cache_root(app.state.cfg), session_id)
     return JSONResponse({"ok": True})
 
 # -------------------------
@@ -2270,7 +2349,8 @@ async def ws_chat(ws: WebSocket, session_id: str):
                     async with sess.chat_lock:
                         # 新 turn 开始：清掉上一次残留的 cancel 信号
                         sess.cancel_event.clear()
-                        # 0.0) 应用 service_config（自定义模型 / TTS）
+                        clear_ai_transition_cancelled(_ai_transition_cancel_cache_root(app.state.cfg), session_id)
+                        # 0.0) 应用 service_config（自定义模型 / TTS / ai_transition）
                         ok_cfg, err_cfg = sess.apply_service_config(data.get("service_config"))
                         if not ok_cfg:
                             await ws_send(ws, "error", {"message": err_cfg or "service_config invalid"})
