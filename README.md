@@ -52,7 +52,7 @@
 
 ## NEWS
 
-* 🎬 **2026-03-30**: Added the **AI Transition Generation** feature, which automatically creates transition shots based on the ending frame of one clip, the opening frame of the next, and a natural-language description, making scene transitions smoother and the narrative more coherent.
+* 🎬 **2026-04-02**: Added the **AI Transition Generation** feature, which automatically creates transition shots based on the ending frame of one clip, the opening frame of the next, and a natural-language description, making scene transitions smoother and the narrative more coherent.
 * 🚀 **2026-03-22**: Introduced an **ASR-based rough cut skill for speech videos**, enabling automatic removal of filler words, disfluencies, and repeated sentences, with timestamp-aligned segmentation for cleaner and more efficient speech editing workflows.
 * 🔥 **2026-03-12**: Integrated with **OpenClaw**, adding two OpenClaw Skills — `openstoryline-install` and `openstoryline-use` — covering the initial installation/first-run workflow and the actual usage workflow, respectively. Also added Skill usage instructions for **Claude Code**, making it easier for **Claude Code** to install and invoke the project in accordance with the repository guidelines.
 * **2026-02-10**: FireRed-OpenStoryline was officially open-sourced.
