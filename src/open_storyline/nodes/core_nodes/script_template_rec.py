@@ -26,7 +26,7 @@ class ScriptTemplateRecomendation(BaseNode):
 
     def __init__(self, server_cfg):
         super().__init__(server_cfg)
-        self.element_filter = ElementFilter(json_path=str(self.server_cfg.script_template.script_template_info_path))
+        self.element_filter = ElementFilter(json_path=self.server_cfg.script_template.script_template_info_path)
         self.vectorstore = StorylineRecall.build_vectorstore(self.element_filter.library)
         self._top_n = 3
 

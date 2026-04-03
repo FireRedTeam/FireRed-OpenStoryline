@@ -254,47 +254,6 @@
           <div id="ttsProviderFields"></div>
         </div>
 
-        <!-- AI 转场配置 -->
-        <div id="aiTransitionBox" class="sidebar-panel"
-            aria-label="AI 转场服务配置"
-            data-i18n-aria-label="sidebar.ai_transition_box_aria">
-          <div class="sidebar-panel-title">
-            <span class="sidebar-panel-title-text" data-i18n="sidebar.ai_transition_title">AI 转场配置</span>
-
-            <a class="sidebar-help"
-              href="https://github.com/FireRedTeam/FireRed-OpenStoryline/blob/main/docs/source/en/api-key.md"
-              target="_blank" rel="noopener noreferrer"
-              data-help-zh="https://github.com/FireRedTeam/FireRed-OpenStoryline/blob/main/docs/source/zh/api-key.md"
-              data-help-en="https://github.com/FireRedTeam/FireRed-OpenStoryline/blob/main/docs/source/en/api-key.md"
-              data-i18n-aria-label="sidebar.help_aria">
-              <span class="sidebar-help-icon" aria-hidden="true">?</span>
-              <span class="sidebar-help-tooltip" role="tooltip">
-                <span class="sidebar-help-tooltip-body" data-i18n="sidebar.help.ai_transition"></span>
-                <span class="sidebar-help-tooltip-cta" data-i18n="sidebar.help.cta">点击查看配置教程</span>
-              </span>
-            </a>
-          </div>
-
-          <select id="aiTransitionProviderSelect"
-                  class="sidebar-model-select"
-                  aria-label="选择 AI 转场服务厂家"
-                  data-i18n-aria-label="sidebar.ai_transition_provider_select_aria"
-                  data-os-persist="sidebar.ai_transition.provider"></select>
-
-          <div class="sidebar-hint" data-i18n="sidebar.ai_transition_hint">
-            提示：字段填写不完整则将使用 config.toml 中的配置。
-          </div>
-
-          <div class="sidebar-warning" role="note" data-i18n-aria-label="sidebar.ai_transition_warning_aria">
-            <span class="sidebar-warning-title" data-i18n="sidebar.ai_transition_warning_title">高资源消耗提示</span>
-            <span class="sidebar-warning-body" data-i18n="sidebar.ai_transition_warning_body">
-              AI 转场会额外触发模型调用，资源消耗通常显著高于常规文案或配音流程，单条转场价格通常在0.5~4元之间，建议按需使用。
-            </span>
-          </div>
-
-          <div id="aiTransitionProviderFields"></div>
-        </div>
-
       </div>
     </div>
   </aside>
@@ -450,13 +409,11 @@
           "filter_clips": {"zh": "筛选片段", "en": "filter clips"},
           "understand_clips": {"zh": "理解素材", "en": "understand clips"},
           "group_clips": {"zh": "片段分组", "en": "group clips"},
-          "generate_ai_transition": {"zh": "AI 转场", "en": "AI transition"},
           "script_template_rec":{"zh": "仿写模版推荐", "en": "recommend script template"},
           "default_editing_workflow_skill": {"zh": "[SKILL] 通用剪辑SKILL", "en": "[SKILL] general editing SKILL"},
           "create_profile_style_skill": {"zh": "[SKILL] 总结新SKILL", "en": "[SKILL] generate a new SKILL"},
           "subtitle_imitation_skill": {"zh": "[SKILL] 文风仿写", "en": "[SKILL] mimic script style"},
           "speech_rough_cut_skill": {"zh": "[SKILL] 口播粗剪", "en": "[SKILL] speech rough cut"},
-          "ai_transition_editing_skill": {"zh": "[SKILL] AI 转场剪辑", "en": "[SKILL] AI transition editing"},
           "generate_script": {"zh": "生成文案", "en": "generate script"},
           "generate_voiceover": {"zh": "生成配音", "en": "generate voiceover"},
           "select_bgm": {"zh": "推荐背景音乐", "en": "recommend music"},
@@ -464,10 +421,28 @@
           "elementrec_text":{"zh": "推荐花字", "en": "recommend stylized subtitle fonts"},
           "plan_timeline": {"zh": "组织时间线", "en": "plan timeline"},
           "plan_timeline_pro": {"zh": "组织时间线 (pro)", "en": "plan timeline (pro)"},
-          "plan_timeline_ai_transition": {"zh": "组织时间线 (AI 转场)", "en": "plan timeline (AI transition)"},
           "render_video": {"zh": "渲染视频", "en": "render"},
           "write_skills": {"zh": "创建新SKILL", "en": "Create a new SKILL"},
 
+          "split_shots_pro": {"zh": "镜头切分 (pro)", "en": "split shots (pro)"},
+          "filter_clips_pro": {"zh": "筛选片段 (pro)", "en": "filter clips (pro)"},
+          "understand_clips_pro": {"zh": "理解素材 (pro)", "en": "understand clips (pro)"},
+          "group_clips_pro": {"zh": "片段分组 (pro)", "en": "group clips (pro)"},
+          "generate_script_pro": {"zh": "生成文案 (pro)", "en": "generate script (pro)"},
+          "elementrec_texts_pro": {"zh": "推荐花字 (pro)", "en": "recommend stylized subtitle fonts (pro)"},
+          "elementrec_title_pro": {"zh": "推荐标题 (pro)", "en": "recommand title"},
+          "elementrec_global_effects_pro": {"zh": "推荐全局特效 (pro)", "en": "recommand global effects (pro)"},
+          "elementrec_local_effects_pro": {"zh": "推荐局部特效 (pro)", "en": "recommand loacl effects (pro)"},
+          "elementrec_close_effects_pro": {"zh": "推荐闭幕特效 (pro)", "en": "recommand close effects (pro)"},
+          "elementrec_filter_pro": {"zh": "推荐滤镜 (pro)", "en": "recommand filter (pro)"},
+          "elementrec_transition_pro": {"zh": "推荐转场 (pro)", "en": "recommand transition (pro)"},
+          "elementrec_text_animation_pro": {"zh": "推荐花字动画 (pro)", "en": "recommended stylized subtitle animations (pro)"},
+          "elementrec_title_clip_pro": {"zh": "推荐片头 (pro)", "en": "recommend title clip (pro)"},
+          "elementrec_tts_pro": {"zh": "推荐配音音色 (pro)", "en": "recommended voice timbre for voiceover (pro)"},
+          "generate_voiceover_pro": {"zh": "生成配音 (pro)", "en": "generate voiceover (pro)"},
+          "music_rec_service_pro": {"zh": "推荐背景音乐 (pro)", "en": "recommand music (pro)"},
+          "timeline_pro": {"zh": "组织时间线 (pro)", "en": "plan timeline (pro)"},
+          "render_template_pro": {"zh": "渲染视频 (pro)", "en": "render (pro)"},
           "read_node_history": {"zh": "读取详细结果", "en": "read history"},
         },
         estimates_ms: {

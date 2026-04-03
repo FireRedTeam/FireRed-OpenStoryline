@@ -157,9 +157,6 @@ class GenerateVoiceoverConfig(ConfigBaseModel):
     tts_provider_params_path: Path = Field(..., description="TTS provider config file path")
     providers: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
-class GenerateAITransitionConfig(ConfigBaseModel):
-    providers: dict[str, dict[str, Any]] = Field(default_factory=dict)
-
 class SelectBGMConfig(ConfigBaseModel):
     sample_rate: int = 22050
     hop_length: int = 2048
@@ -254,7 +251,6 @@ class Settings(ConfigBaseModel):
     group_clips: GroupClipsConfig = Field(default_factory=GroupClipsConfig)
     script_template: RecommendScriptTemplateConfig
     generate_voiceover: GenerateVoiceoverConfig
-    generate_ai_transition: GenerateAITransitionConfig
     select_bgm: SelectBGMConfig
     recommend_text: RecommendTextConfig
     plan_timeline: PlanTimelineConfig

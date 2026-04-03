@@ -247,7 +247,7 @@ class SplitShotsNode(BaseNode):
         node_kind="split_shots",
         require_prior_kind=["load_media"],
         default_require_prior_kind=["load_media"],
-        next_available_node=["understand_clips"],
+        next_available_node=["understand_clips", "understand_clips_pro"],
     )
     input_schema = SplitShotsInput
 

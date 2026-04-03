@@ -48,10 +48,6 @@ if SRC_DIR not in sys.path:
 from open_storyline.agent import build_agent, ClientContext
 from open_storyline.utils.prompts import get_prompt
 from open_storyline.utils.media_handler import scan_media_dir
-from open_storyline.utils.ai_transition_cancel import (
-    clear_ai_transition_cancelled,
-    set_ai_transition_cancelled,
-)
 from open_storyline.config import load_settings, default_config_path
 from open_storyline.config import Settings
 from open_storyline.storage.agent_memory import ArtifactStore
@@ -72,6 +68,12 @@ CHUNK_SIZE = 1024 * 1024  # 1MB
 USE_SESSION_SUBDIR = True
 
 CUSTOM_MODEL_KEY = "__custom__"
+SESSION_STATE_FILENAME = "session_state.json"
+SESSION_STATE_MAX_HISTORY = 2000
+SESSION_STATE_MAX_LC_MESSAGES = 4000
+UPLOAD_STATUS_SYSTEM_PREFIX = "【User media upload status】"
+UPLOAD_STATUS_SYSTEM_EMPTY = "【User media upload status】{}"
+MASKED_SECRET = "***"
 
 def debug_traceback_print(cfg: Settings):
     if cfg.developer.developer_mode:
@@ -83,13 +85,6 @@ def _s(x: Any) -> str:
 def _norm_url(u: Any) -> str:
     u = _s(u)
     return u.rstrip("/") if u else ""
-
-
-def _ai_transition_cancel_cache_root(cfg: Settings) -> Path:
-    cache_dir = Path(cfg.local_mcp_server.server_cache_dir)
-    if not cache_dir.is_absolute():
-        cache_dir = Path(ROOT_DIR) / cache_dir
-    return cache_dir
 
 MODEL_ENV_KEYS = {
     "llm": {
@@ -173,35 +168,19 @@ def _stable_dict_key(d: Optional[Dict[str, Any]]) -> str:
     except Exception:
         return str(d or {})
 
-def _parse_provider_runtime_config(service_cfg: Any, key_name: str) -> Dict[str, Any]:
-    cfg = service_cfg.get(key_name)
-    if not isinstance(cfg, dict):
-        return {}
-
-    provider = _s(cfg.get("provider")).lower()
-    if not provider:
-        return {}
-
-    provider_block = cfg.get(provider)
-    if not isinstance(provider_block, dict):
-        provider_block = {}
-
-    return {"provider": provider, provider: provider_block}
-
 def _parse_service_config(service_cfg: Any) -> Tuple[
     Optional[Dict[str, Any]],
     Optional[Dict[str, Any]],
     Dict[str, Any],
     Dict[str, Any],
-    Dict[str, Any],
     Optional[str]]:
     """
-    返回 (custom_llm, custom_vlm, tts_cfg, ai_transition_cfg, pexels, err)
+    返回 (custom_llm, custom_vlm, tts_cfg, pexels, err)
     - custom_llm/custom_vlm: {"model","base_url","api_key"} 或 None（允许只传 llm 或只传 vlm）
     - tts_cfg: dict（可能为空）
     """
     if not isinstance(service_cfg, dict):
-        return None, None, {}, {}, {}, None
+        return None, None, {}, {}, None
 
     # ---- custom models ----
     custom_llm = None
@@ -210,7 +189,7 @@ def _parse_service_config(service_cfg: Any) -> Tuple[
 
     if custom_models is not None:
         if not isinstance(custom_models, dict):
-            return None, None, {}, {}, {}, "service_config.custom_models 必须是对象"
+            return None, None, {}, {}, "service_config.custom_models 必须是对象"
 
         def _pick(m: Any, label: str) -> Tuple[Optional[Dict[str, str]], Optional[str]]:
             if m is None:
@@ -230,16 +209,21 @@ def _parse_service_config(service_cfg: Any) -> Tuple[
 
         custom_llm, err1 = _pick(custom_models.get("llm"), "llm")
         if err1:
-            return None, None, {}, {}, {}, err1
+            return None, None, {}, {}, err1
 
         custom_vlm, err2 = _pick(custom_models.get("vlm"), "vlm")
         if err2:
-            return None, None, {}, {}, {}, err2
+            return None, None, {}, {}, err2
 
-    # ---- provider runtime config ----
-    tts_cfg = _parse_provider_runtime_config(service_cfg, "tts")
-    ai_transition_cfg = _parse_provider_runtime_config(service_cfg, "ai_transition")
-
+    # ---- tts ----
+    tts_cfg: Dict[str, Any] = {}
+    tts = service_cfg.get("tts")
+    if isinstance(tts, dict):
+        provider = (tts.get("provider") or "").strip().lower()
+        if provider:
+            provider_block = tts.get(provider)
+            tts_cfg = {"provider": provider, provider: provider_block}
+    
     # ---- pexels ----
     pexels_cfg: Dict[str, Any] = {}
     search_media = service_cfg.get("search_media")
@@ -261,7 +245,7 @@ def _parse_service_config(service_cfg: Any) -> Tuple[
             api_key = _s(search_media.get("pexels_api_key") or search_media.get("pexels_api_key"))
             pexels_cfg = {"mode": mode, "api_key": api_key}
 
-    return custom_llm, custom_vlm, tts_cfg, ai_transition_cfg, pexels_cfg, None
+    return custom_llm, custom_vlm, tts_cfg, pexels_cfg, None
 
 def is_developer_mode(cfg: Settings) -> bool:
     try:
@@ -304,6 +288,205 @@ def detect_media_kind(filename: str) -> str:
     if ext in {".mp4", ".mov", ".avi", ".mkv", ".webm"}:
         return "video"
     return "unknown"
+
+
+_SECRET_VALUE_PATTERNS = [
+    re.compile(r"sk-[A-Za-z0-9._-]{16,}"),
+    re.compile(r"Bearer\s+[A-Za-z0-9._\-+/=]{16,}", re.IGNORECASE),
+    re.compile(r"eyJ[A-Za-z0-9_-]{16,}\.[A-Za-z0-9._-]{16,}\.?[A-Za-z0-9._-]*"),
+    re.compile(r"(?i)(?:api[_-]?key|access[_-]?token|refresh[_-]?token|authorization)\s*[:=]\s*[\"']?[A-Za-z0-9._\-+/=]{16,}[\"']?"),
+]
+
+# Inline `key: value` / `key=value` in plain strings: dict recursion masks by field name,
+# but the same secret in a single string only saw _SECRET_VALUE_PATTERNS (often 16+ chars).
+# Match unambiguous credential field names with shorter values (exclude bare "token"/"password"
+# which would false-positive in natural language).
+_SECRET_INLINE_ASSIGNMENT_RE = re.compile(
+    r"(?i)(?:api[_-]?key|api[_-]?token|auth[_-]?token|access[_-]?token|"
+    r"client[_-]?secret|refresh[_-]?token|x-api-key|apikey|access[_-]?key|accesskey|"
+    r"pexels[_-]?api[_-]?key)\s*[:=]\s*[\"']?"
+    r"[A-Za-z0-9._\-+/=]{3,}"
+    r"[\"']?"
+)
+
+
+def _mask_secret_string(text: str) -> str:
+    s = str(text or "")
+    for pat in _SECRET_VALUE_PATTERNS:
+        s = pat.sub(MASKED_SECRET, s)
+    s = _SECRET_INLINE_ASSIGNMENT_RE.sub(MASKED_SECRET, s)
+    return s
+
+
+def _to_json_safe(v: Any) -> Any:
+    if v is None or isinstance(v, (bool, int, float, str)):
+        return v
+    if isinstance(v, list):
+        return [_to_json_safe(x) for x in v]
+    if isinstance(v, tuple):
+        return [_to_json_safe(x) for x in v]
+    if isinstance(v, dict):
+        return {str(k): _to_json_safe(x) for k, x in v.items()}
+    try:
+        json.dumps(v, ensure_ascii=False)
+        return v
+    except Exception:
+        return str(v)
+
+
+def _mask_secrets_recursive(v: Any) -> Any:
+    if isinstance(v, dict):
+        out: Dict[str, Any] = {}
+        for k, val in v.items():
+            key = str(k)
+            if _is_secret_field_name(key):
+                out[key] = MASKED_SECRET
+            else:
+                out[key] = _mask_secrets_recursive(val)
+        return out
+    if isinstance(v, list):
+        return [_mask_secrets_recursive(x) for x in v]
+    if isinstance(v, tuple):
+        return [_mask_secrets_recursive(x) for x in v]
+    if isinstance(v, str):
+        return _mask_secret_string(v)
+    return _to_json_safe(v)
+
+
+def _mask_tool_history_record(rec: Dict[str, Any]) -> Dict[str, Any]:
+    r = dict(rec or {})
+    for key in ("args", "summary", "message"):
+        if key in r:
+            r[key] = _mask_secrets_recursive(r.get(key))
+    return r
+
+
+def _serialize_lc_message(msg: BaseMessage) -> Dict[str, Any]:
+    if isinstance(msg, SystemMessage):
+        return {"type": "system", "content": _to_json_safe(msg.content)}
+    if isinstance(msg, HumanMessage):
+        return {"type": "human", "content": _to_json_safe(msg.content)}
+    if isinstance(msg, ToolMessage):
+        payload = {
+            "type": "tool",
+            "content": _to_json_safe(msg.content),
+            "tool_call_id": str(getattr(msg, "tool_call_id", "") or ""),
+        }
+        ak = getattr(msg, "additional_kwargs", None)
+        if isinstance(ak, dict) and ak:
+            payload["additional_kwargs"] = _to_json_safe(ak)
+        name = getattr(msg, "name", None)
+        if name not in (None, ""):
+            payload["name"] = str(name)
+        return payload
+    if isinstance(msg, AIMessage):
+        ak = getattr(msg, "additional_kwargs", None) or {}
+        tc = getattr(msg, "tool_calls", None) or []
+        if not isinstance(tc, list):
+            tc = []
+        tc = _to_json_safe(tc)
+        if not isinstance(tc, list):
+            tc = []
+        return {
+            "type": "ai",
+            "content": _to_json_safe(msg.content),
+            "additional_kwargs": _to_json_safe(ak),
+            "tool_calls": tc,
+        }
+    return {
+        "type": "unknown",
+        "content": _to_json_safe(getattr(msg, "content", "")),
+    }
+
+
+def _deserialize_lc_message(data: Dict[str, Any]) -> Optional[BaseMessage]:
+    if not isinstance(data, dict):
+        return None
+    t = str(data.get("type") or "").strip().lower()
+    content = data.get("content", "")
+    if t == "system":
+        return SystemMessage(content=content)
+    if t == "human":
+        return HumanMessage(content=content)
+    if t == "tool":
+        tcid = str(data.get("tool_call_id") or "").strip()
+        if not tcid:
+            logger.warning(
+                "Persisted ToolMessage skipped: empty tool_call_id. "
+                "If the preceding AI turn had tool_calls, load will synthesize cancelled tool results."
+            )
+            return None
+        kwargs: Dict[str, Any] = {}
+        ak = data.get("additional_kwargs")
+        if isinstance(ak, dict):
+            kwargs["additional_kwargs"] = ak
+        name = data.get("name")
+        if name not in (None, ""):
+            kwargs["name"] = str(name)
+        try:
+            return ToolMessage(content=content, tool_call_id=tcid, **kwargs)
+        except TypeError:
+            # Keep backward compatibility with signatures that do not accept `name`.
+            kwargs.pop("name", None)
+            return ToolMessage(content=content, tool_call_id=tcid, **kwargs)
+    if t == "ai":
+        ak = data.get("additional_kwargs")
+        if not isinstance(ak, dict):
+            ak = {}
+        tc_explicit = data.get("tool_calls")
+        if isinstance(tc_explicit, list):
+            tool_calls = tc_explicit
+        else:
+            tool_calls = ak.get("tool_calls")
+        if not isinstance(tool_calls, list):
+            tool_calls = []
+        if tool_calls:
+            ak = dict(ak)
+            ak["tool_calls"] = tool_calls
+        # Some providers (and langchain-core versions) require tool calls to be present
+        # on the AIMessage object (not only inside additional_kwargs) in order to
+        # produce a valid OpenAI-style messages list. Without this, ToolMessage
+        # may become an "orphan" and providers will reject the request.
+        try:
+            return AIMessage(content=content, additional_kwargs=ak, tool_calls=tool_calls)  # type: ignore[arg-type]
+        except TypeError:
+            return AIMessage(content=content, additional_kwargs=ak)
+    return None
+
+
+def _tool_call_ids_from_ai_message_for_state(m: BaseMessage) -> Set[str]:
+    ids: Set[str] = set()
+    if not isinstance(m, AIMessage):
+        return ids
+
+    tc = getattr(m, "tool_calls", None) or []
+    for c in tc:
+        _id = None
+        if isinstance(c, dict):
+            _id = c.get("id") or c.get("tool_call_id")
+        else:
+            _id = getattr(c, "id", None) or getattr(c, "tool_call_id", None)
+        if _id:
+            ids.add(str(_id))
+
+    ak = getattr(m, "additional_kwargs", None) or {}
+    tc2 = ak.get("tool_calls") or []
+    for c in tc2:
+        if isinstance(c, dict):
+            _id = c.get("id") or c.get("tool_call_id")
+            if _id:
+                ids.add(str(_id))
+    return ids
+
+
+def _is_valid_session_id_hex(name: str) -> bool:
+    if len(name) != 32:
+        return False
+    try:
+        val = uuid.UUID(name)
+        return val.hex == name and val.version == 4
+    except Exception:
+        return False
 
 _MEDIA_RE = re.compile(r"^media_(\d+)", re.IGNORECASE)
 
@@ -1049,6 +1232,10 @@ class MediaStore:
                     pass
 
 
+class SessionStateUnavailableError(Exception):
+    """session_state.json exists but cannot be read or parsed (I/O or JSON). Callers should map to 503, not 404."""
+
+
 class ChatSession:
     """
     一个 session 的全部状态：
@@ -1095,7 +1282,7 @@ class ChatSession:
 
         self.lc_messages: List[BaseMessage] = [
             SystemMessage(content=get_prompt("instruction.system", lang=self.lang)),
-            SystemMessage(content="【User media upload status】{}"),
+            SystemMessage(content=UPLOAD_STATUS_SYSTEM_EMPTY),
         ]
         self.history: List[Dict[str, Any]] = []
 
@@ -1110,7 +1297,6 @@ class ChatSession:
         self.custom_llm_config: Optional[Dict[str, Any]] = None
         self.custom_vlm_config: Optional[Dict[str, Any]] = None
         self.tts_config: Dict[str, Any] = {}
-        self.ai_transition_config: Dict[str, Any] = {}
         self._agent_build_key: Optional[Tuple[Any, ...]] = None
 
         self.pexels_key_mode: str = "default"   # "default" | "custom"
@@ -1119,7 +1305,394 @@ class ChatSession:
         self._media_seq_inited = False
         self._media_seq_next = 1
 
+    @classmethod
+    def state_file_path_for(cls, session_id: str, cfg: Settings) -> str:
+        return os.path.abspath(os.path.join(str(cfg.project.outputs_dir), session_id, SESSION_STATE_FILENAME))
+
+    def state_file_path(self) -> str:
+        return self.state_file_path_for(self.session_id, self.cfg)
+
+    def _serialize_load_media(self) -> Dict[str, Dict[str, Any]]:
+        out: Dict[str, Dict[str, Any]] = {}
+        for mid, meta in (self.load_media or {}).items():
+            out[str(mid)] = {
+                "id": str(meta.id),
+                "name": str(meta.name),
+                "kind": str(meta.kind),
+                "path": str(meta.path),
+                "thumb_path": str(meta.thumb_path) if meta.thumb_path else None,
+                "ts": float(meta.ts),
+            }
+        return out
+
+    @staticmethod
+    def _deserialize_load_media(data: Any) -> Dict[str, MediaMeta]:
+        out: Dict[str, MediaMeta] = {}
+        if not isinstance(data, dict):
+            return out
+        for _k, v in data.items():
+            if not isinstance(v, dict):
+                continue
+            try:
+                meta = MediaMeta(
+                    id=str(v.get("id") or ""),
+                    name=str(v.get("name") or ""),
+                    kind=str(v.get("kind") or "unknown"),
+                    path=str(v.get("path") or ""),
+                    thumb_path=(str(v.get("thumb_path")) if v.get("thumb_path") else None),
+                    ts=float(v.get("ts") or time.time()),
+                )
+                if meta.id:
+                    out[meta.id] = meta
+            except Exception:
+                continue
+        return out
+
+    @staticmethod
+    def _sanitize_service_cfg_for_state(cfg_obj: Any) -> Any:
+        if cfg_obj is None:
+            return None
+        return _mask_secrets_recursive(_to_json_safe(cfg_obj))
+
+    @staticmethod
+    def _normalized_lc_messages_for_state(messages: List[BaseMessage], lang: str) -> List[BaseMessage]:
+        instruction_sys = get_prompt("instruction.system", lang=lang)
+        upload_placeholder = UPLOAD_STATUS_SYSTEM_EMPTY
+        msgs: List[BaseMessage] = [m for m in (messages or []) if isinstance(m, BaseMessage)]
+
+        if not msgs:
+            return [SystemMessage(content=instruction_sys), SystemMessage(content=upload_placeholder)]
+
+        if not isinstance(msgs[0], SystemMessage) or str(getattr(msgs[0], "content", "")).strip() != str(instruction_sys).strip():
+            msgs.insert(0, SystemMessage(content=instruction_sys))
+
+        def _is_upload_stats_msg(m: BaseMessage) -> bool:
+            if not isinstance(m, SystemMessage):
+                return False
+            return str(getattr(m, "content", "")).strip().startswith(UPLOAD_STATUS_SYSTEM_PREFIX)
+
+        if len(msgs) == 1:
+            msgs.append(SystemMessage(content=upload_placeholder))
+        elif not _is_upload_stats_msg(msgs[1]):
+            found_idx = None
+            for i in range(2, len(msgs)):
+                if _is_upload_stats_msg(msgs[i]):
+                    found_idx = i
+                    break
+            if found_idx is not None:
+                m = msgs.pop(found_idx)
+                msgs.insert(1, m)
+            else:
+                msgs.insert(1, SystemMessage(content=upload_placeholder))
+        return msgs
+
+    def _persist_history(self) -> List[Dict[str, Any]]:
+        out: List[Dict[str, Any]] = []
+        for item in (self.history or []):
+            if not isinstance(item, dict):
+                continue
+            rec = _to_json_safe(item)
+            if not isinstance(rec, dict):
+                continue
+            if str(rec.get("role") or "") == "tool":
+                rec = _mask_tool_history_record(rec)
+            out.append(rec)
+        if SESSION_STATE_MAX_HISTORY > 0 and len(out) > SESSION_STATE_MAX_HISTORY:
+            out = out[-SESSION_STATE_MAX_HISTORY:]
+        return out
+
+    def _serialize_lc_messages(self) -> List[Dict[str, Any]]:
+        msgs = self._normalized_lc_messages_for_state(list(self.lc_messages or []), self.lang)
+        if SESSION_STATE_MAX_LC_MESSAGES > 0 and len(msgs) > SESSION_STATE_MAX_LC_MESSAGES:
+            msgs = msgs[-SESSION_STATE_MAX_LC_MESSAGES:]
+            msgs = self._normalized_lc_messages_for_state(msgs, self.lang)
+            if len(msgs) > SESSION_STATE_MAX_LC_MESSAGES:
+                if SESSION_STATE_MAX_LC_MESSAGES <= 2:
+                    msgs = msgs[:SESSION_STATE_MAX_LC_MESSAGES]
+                else:
+                    # Keep invariant-critical first 2 system messages, trim tail payload.
+                    keep_tail = SESSION_STATE_MAX_LC_MESSAGES - 2
+                    msgs = msgs[:2] + msgs[-keep_tail:]
+
+        out: List[Dict[str, Any]] = []
+        for m in msgs:
+            try:
+                out.append(_serialize_lc_message(m))
+            except Exception:
+                continue
+        return out
+
+    def dump_state(self) -> Dict[str, Any]:
+        return {
+            "version": 1,
+            "session_id": self.session_id,
+            "lang": self.lang,
+            "history": self._persist_history(),
+            "chat_model_key": self.chat_model_key,
+            "vlm_model_key": self.vlm_model_key,
+            "load_media": self._serialize_load_media(),
+            "pending_media_ids": [str(x) for x in (self.pending_media_ids or [])],
+            "lc_messages_serialized": self._serialize_lc_messages(),
+            "pexels_key_mode": self.pexels_key_mode,
+            "custom_llm_config": self._sanitize_service_cfg_for_state(self.custom_llm_config),
+            "custom_vlm_config": self._sanitize_service_cfg_for_state(self.custom_vlm_config),
+            "tts_config": self._sanitize_service_cfg_for_state(self.tts_config),
+        }
+
+    def save_state_atomic(self) -> None:
+        path = self.state_file_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".tmp"
+        data = self.dump_state()
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
+
+    def _ensure_lc_messages_invariants(self) -> None:
+        instruction_sys = get_prompt("instruction.system", lang=self.lang)
+        upload_placeholder = UPLOAD_STATUS_SYSTEM_EMPTY
+        msgs: List[BaseMessage] = [m for m in (self.lc_messages or []) if isinstance(m, BaseMessage)]
+
+        if not msgs:
+            msgs = [SystemMessage(content=instruction_sys), SystemMessage(content=upload_placeholder)]
+            self.lc_messages = msgs
+            self._attach_stats_msg_idx = 1
+            return
+
+        if not isinstance(msgs[0], SystemMessage) or str(getattr(msgs[0], "content", "")).strip() != str(instruction_sys).strip():
+            msgs.insert(0, SystemMessage(content=instruction_sys))
+
+        def _is_upload_stats_msg(m: BaseMessage) -> bool:
+            if not isinstance(m, SystemMessage):
+                return False
+            return str(getattr(m, "content", "")).strip().startswith(UPLOAD_STATUS_SYSTEM_PREFIX)
+
+        if len(msgs) <= 1:
+            msgs.append(SystemMessage(content=upload_placeholder))
+        elif not _is_upload_stats_msg(msgs[1]):
+            found_idx = None
+            for i in range(2, len(msgs)):
+                if _is_upload_stats_msg(msgs[i]):
+                    found_idx = i
+                    break
+            if found_idx is not None:
+                m = msgs.pop(found_idx)
+                msgs.insert(1, m)
+            else:
+                msgs.insert(1, SystemMessage(content=upload_placeholder))
+
+        self.lc_messages = msgs
+        self._attach_stats_msg_idx = 1
+
+    def _close_unfinished_tool_calls_in_lc_messages(self) -> None:
+        msgs_in: List[BaseMessage] = [m for m in (self.lc_messages or []) if isinstance(m, BaseMessage)]
+        out: List[BaseMessage] = []
+        i = 0
+        n = len(msgs_in)
+        cancelled_content = json.dumps({"cancelled": True, "cancelled_by_restart": True}, ensure_ascii=False)
+
+        while i < n:
+            m = msgs_in[i]
+            if not isinstance(m, AIMessage):
+                out.append(m)
+                i += 1
+                continue
+
+            out.append(m)
+            expected_ids = _tool_call_ids_from_ai_message_for_state(m)
+            responded_ids: Set[str] = set()
+            i += 1
+
+            # Preserve valid contiguous ToolMessages for this AI block.
+            while i < n and isinstance(msgs_in[i], ToolMessage):
+                tm = msgs_in[i]
+                tcid = str(getattr(tm, "tool_call_id", "") or "").strip()
+                if tcid and (tcid in expected_ids) and (tcid not in responded_ids):
+                    responded_ids.add(tcid)
+                    out.append(tm)
+                i += 1
+
+            # Inject cancelled results right after the originating AI block.
+            missing = sorted(expected_ids - responded_ids)
+            for tcid in missing:
+                out.append(ToolMessage(content=cancelled_content, tool_call_id=str(tcid)))
+
+        self.lc_messages = out
+
+    def _sanitize_tool_protocol_in_lc_messages(self) -> None:
+        """
+        Ensure lc_messages won't violate OpenAI tool-calling protocol:
+        ToolMessage must correspond to a preceding AIMessage tool_call_id.
+        When restore/serialization fails to fully reconstruct tool_calls,
+        providers may reject requests with 400. We drop orphan ToolMessages here.
+        """
+        msgs_in: List[BaseMessage] = [m for m in (self.lc_messages or []) if isinstance(m, BaseMessage)]
+        msgs_out: List[BaseMessage] = []
+        pending_ids: Set[str] = set()
+        responded_ids: Set[str] = set()
+
+        for m in msgs_in:
+            if isinstance(m, AIMessage):
+                pending_ids = _tool_call_ids_from_ai_message_for_state(m)
+                responded_ids = set()
+                msgs_out.append(m)
+                continue
+            if isinstance(m, ToolMessage):
+                tcid = str(getattr(m, "tool_call_id", "") or "").strip()
+                if tcid and (tcid in pending_ids) and (tcid not in responded_ids):
+                    responded_ids.add(tcid)
+                    msgs_out.append(m)
+                # else: drop orphan/duplicate tool message
+                continue
+            pending_ids = set()
+            responded_ids = set()
+            msgs_out.append(m)
+
+        self.lc_messages = msgs_out
+
+    def _normalize_running_tool_records(self) -> None:
+        for rec in (self.history or []):
+            if not isinstance(rec, dict):
+                continue
+            if str(rec.get("role") or "") != "tool":
+                continue
+            if str(rec.get("state") or "").lower() == "running":
+                rec["state"] = "error"
+                rec["progress"] = 1.0
+                rec["message"] = "Cancelled by restart"
+                rec["summary"] = {"cancelled": True, "cancelled_by_restart": True}
+
+    def _rebuild_tool_history_index(self) -> None:
+        self._tool_history_index = {}
+        for idx, rec in enumerate(self.history or []):
+            if not isinstance(rec, dict):
+                continue
+            if str(rec.get("role") or "") != "tool":
+                continue
+            tcid = rec.get("tool_call_id")
+            if tcid:
+                self._tool_history_index[str(tcid)] = idx
+
+    @classmethod
+    def load_from_state(cls, session_id: str, cfg: Settings) -> Optional["ChatSession"]:
+        path = cls.state_file_path_for(session_id, cfg)
+        if not os.path.exists(path):
+            return None
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                raw = f.read()
+            data = json.loads(raw)
+        except OSError as e:
+            logger.warning("session state read failed sid=%s path=%s err=%s", session_id, path, e)
+            raise SessionStateUnavailableError("read_error") from e
+        except json.JSONDecodeError as e:
+            logger.warning("session state json invalid sid=%s path=%s err=%s", session_id, path, e)
+            raise SessionStateUnavailableError("corrupt_json") from e
+
+        if not isinstance(data, dict):
+            logger.warning("session state not a dict sid=%s path=%s", session_id, path)
+            raise SessionStateUnavailableError("invalid_shape")
+
+        # Mismatch vs persisted session_id → not this resource (404). Do not use 503 here:
+        # 503 is reserved for read/parse failures (SessionStateUnavailableError).
+        sid_in_file = str(data.get("session_id") or "").strip()
+        if sid_in_file and sid_in_file != session_id:
+            logger.warning(
+                "session state session_id mismatch path=%s requested=%s file=%s (treating as not found)",
+                path,
+                session_id,
+                sid_in_file,
+            )
+            return None
+
+        sess = cls(session_id=session_id, cfg=cfg)
+        sess.lang = str(data.get("lang") or "zh").strip().lower()
+        if sess.lang not in ("zh", "en"):
+            sess.lang = "zh"
+
+        sess.history = list(data.get("history") or [])
+        sess.chat_model_key = str(data.get("chat_model_key") or sess.chat_model_key)
+        sess.vlm_model_key = str(data.get("vlm_model_key") or sess.vlm_model_key)
+        sess.load_media = cls._deserialize_load_media(data.get("load_media"))
+
+        pending_ids = [str(x) for x in (data.get("pending_media_ids") or [])]
+        sess.pending_media_ids = [x for x in pending_ids if x in sess.load_media]
+
+        lc_msgs_raw = data.get("lc_messages_serialized") or []
+        lc_msgs: List[BaseMessage] = []
+        if isinstance(lc_msgs_raw, list):
+            for item in lc_msgs_raw:
+                try:
+                    msg = _deserialize_lc_message(item)
+                    if msg is not None:
+                        lc_msgs.append(msg)
+                except Exception:
+                    continue
+        sess.lc_messages = lc_msgs
+        sess._ensure_lc_messages_invariants()
+
+        sess.pexels_key_mode = str(data.get("pexels_key_mode") or "default").strip().lower()
+        if sess.pexels_key_mode not in ("default", "custom"):
+            sess.pexels_key_mode = "default"
+        sess.pexels_custom_key = ""
+
+        llm_cfg = data.get("custom_llm_config")
+        sess.custom_llm_config = llm_cfg if isinstance(llm_cfg, dict) else None
+        vlm_cfg = data.get("custom_vlm_config")
+        sess.custom_vlm_config = vlm_cfg if isinstance(vlm_cfg, dict) else None
+        tts_cfg = data.get("tts_config")
+        sess.tts_config = tts_cfg if isinstance(tts_cfg, dict) else {}
+
+        sess._normalize_running_tool_records()
+        sess._close_unfinished_tool_calls_in_lc_messages()
+        sess._sanitize_tool_protocol_in_lc_messages()
+        sess._rebuild_tool_history_index()
+        sess._ensure_lc_messages_invariants()
+        return sess
+
+    def _missing_secret_config_fields(self) -> List[str]:
+        missing: List[str] = []
+
+        def _is_missing(v: Any) -> bool:
+            s = str(v or "").strip()
+            return (not s) or s == MASKED_SECRET
+
+        if self.chat_model_key == CUSTOM_MODEL_KEY:
+            cfg = self.custom_llm_config if isinstance(self.custom_llm_config, dict) else {}
+            if _is_missing(cfg.get("model")) or _is_missing(cfg.get("base_url")) or _is_missing(cfg.get("api_key")):
+                missing.append("custom_llm")
+
+        if self.vlm_model_key == CUSTOM_MODEL_KEY:
+            cfg = self.custom_vlm_config if isinstance(self.custom_vlm_config, dict) else {}
+            if _is_missing(cfg.get("model")) or _is_missing(cfg.get("base_url")) or _is_missing(cfg.get("api_key")):
+                missing.append("custom_vlm")
+
+        if (self.pexels_key_mode or "").lower() == "custom":
+            if _is_missing(self.pexels_custom_key):
+                missing.append("pexels_custom")
+
+        tts_cfg = self.tts_config if isinstance(self.tts_config, dict) else {}
+        provider = str(tts_cfg.get("provider") or "").strip().lower()
+        if provider:
+            block = tts_cfg.get(provider)
+            if not isinstance(block, dict):
+                missing.append(f"tts:{provider}")
+            else:
+                has_secret_key = False
+                miss_secret = False
+                for k, v in block.items():
+                    if _is_secret_field_name(str(k)):
+                        has_secret_key = True
+                        if _is_missing(v):
+                            miss_secret = True
+                if has_secret_key and miss_secret:
+                    missing.append(f"tts:{provider}")
+
+        return sorted(set(missing))
+
     def _ensure_system_prompt(self) -> None:
+        # Keep the instruction system prompt and upload-status placeholder stable.
+        self._ensure_lc_messages_invariants()
         sys = (get_prompt("instruction.system", lang=self.lang) or "").strip()
         if not sys:
             return
@@ -1194,7 +1767,7 @@ class ChatSession:
 
 
     def apply_service_config(self, service_cfg: Any) -> Tuple[bool, Optional[str]]:
-        llm, vlm, tts, ai_transition, pexels, err = _parse_service_config(service_cfg)
+        llm, vlm, tts, pexels, err = _parse_service_config(service_cfg)
         if err:
             return False, err
 
@@ -1206,9 +1779,6 @@ class ChatSession:
         # tts 允许为空；非空才覆盖
         if isinstance(tts, dict) and tts:
             self.tts_config = tts
-
-        if isinstance(ai_transition, dict) and ai_transition:
-            self.ai_transition_config = ai_transition
 
         # ---- pexels ----
         if isinstance(pexels, dict) and pexels:
@@ -1223,6 +1793,13 @@ class ChatSession:
         return True, None
 
     async def ensure_agent(self) -> None:
+        missing = self._missing_secret_config_fields()
+        if missing:
+            raise RuntimeError(
+                "requires_reconfig: custom llm/vlm/tts/pexels secrets missing after restart; "
+                f"missing={','.join(missing)}"
+            )
+
         # 1) resolve LLM override
         if self.chat_model_key == CUSTOM_MODEL_KEY:
             if not isinstance(self.custom_llm_config, dict):
@@ -1259,7 +1836,6 @@ class ChatSession:
                     ToolInterceptor.inject_media_content_before,
                     ToolInterceptor.save_media_content_after,
                     ToolInterceptor.inject_tts_config,
-                    ToolInterceptor.inject_ai_transition_config,
                     ToolInterceptor.inject_pexels_api_key,
                 ],
                 llm_override=llm_override,
@@ -1278,7 +1854,6 @@ class ChatSession:
                 chat_model_key=self.chat_model_key,
                 vlm_model_key=self.vlm_model_key,
                 tts_config=(self.tts_config or None),
-                ai_transition_config=(self.ai_transition_config or None),
                 pexels_api_key=None,
                 lang=self.lang,
             )
@@ -1286,7 +1861,6 @@ class ChatSession:
             self.client_context.chat_model_key = self.chat_model_key
             self.client_context.vlm_model_key = self.vlm_model_key
             self.client_context.tts_config = (self.tts_config or None)
-            self.client_context.ai_transition_config = (self.ai_transition_config or None)
             self.client_context.lang = self.lang
 
         # ---- resolve pexels_api_key for runtime context ----
@@ -1510,17 +2084,51 @@ class SessionStore:
         sess = ChatSession(sid, self.cfg)
         async with self._lock:
             self._sessions[sid] = sess
+        await self.save_session_state(sess)
         return sess
 
     async def get(self, sid: str) -> Optional[ChatSession]:
         async with self._lock:
-            return self._sessions.get(sid)
+            sess = self._sessions.get(sid)
+            if sess is not None:
+                return sess
+
+        sid = str(sid or "").strip()
+        if not _is_valid_session_id_hex(sid):
+            return None
+
+        try:
+            restored = ChatSession.load_from_state(sid, self.cfg)
+        except SessionStateUnavailableError:
+            raise
+        if restored is None:
+            return None
+        try:
+            restored.save_state_atomic()
+        except Exception:
+            pass
+
+        async with self._lock:
+            existing = self._sessions.get(sid)
+            if existing is not None:
+                return existing
+            self._sessions[sid] = restored
+            return restored
 
     async def get_or_404(self, sid: str) -> ChatSession:
-        sess = await self.get(sid)
+        try:
+            sess = await self.get(sid)
+        except SessionStateUnavailableError as e:
+            raise HTTPException(status_code=503, detail="session state unavailable") from e
         if not sess:
             raise HTTPException(status_code=404, detail="session not found")
         return sess
+
+    async def save_session_state(self, sess: ChatSession) -> None:
+        try:
+            sess.save_state_atomic()
+        except Exception as e:
+            logger.warning("failed to persist session state. sid=%s err=%s", getattr(sess, "session_id", "?"), e)
 
 
 @asynccontextmanager
@@ -1582,60 +2190,27 @@ async def _enforce_upload_media_count_limit(request: Request, cost: float) -> Op
 
 _TTS_UI_SECRET_KEYS = {
     "api_key",
+    "api-token",
+    "api_token",
+    "auth_token",
     "access_token",
     "authorization",
     "token",
     "password",
     "secret",
+    "client_secret",
+    "refresh_token",
     "x-api-key",
     "apikey",
     "access_key",
     "accesskey",
-}
-
-_PROVIDER_UI_META_KEYS = {
-    "label",
-    "name",
-    "display_name",
-}
-
-_PROVIDER_UI_LABEL_OVERRIDES = {
-    "302": "302.AI",
-    "bytedance": "字节跳动 ByteDance",
-    "dashscope": "阿里万相 Wan",
-}
-
-_PROVIDER_UI_LABEL_OVERRIDES_BY_SECTION = {
-    "generate_voiceover": {
-        "minimax": "MiniMax",
-    },
-    "generate_ai_transition": {
-        "minimax": "MiniMax 海螺 (Hailuo)",
-    },
+    "pexels_api_key",
 }
 
 def _is_secret_field_name(k: str) -> bool:
     if str(k or "").strip().lower() in _TTS_UI_SECRET_KEYS:
         return True
     return False
-
-def _get_provider_ui_label(section_name: str, provider: str, provider_cfg: Any) -> str:
-    if isinstance(provider_cfg, dict):
-        explicit_label = _s(
-            provider_cfg.get("label")
-            or provider_cfg.get("display_name")
-            or provider_cfg.get("name")
-        )
-        if explicit_label:
-            return explicit_label
-
-    section_key = _s(section_name)
-    provider_key = _s(provider).lower()
-    section_overrides = _PROVIDER_UI_LABEL_OVERRIDES_BY_SECTION.get(section_key, {})
-    if provider_key in section_overrides:
-        return section_overrides[provider_key]
-
-    return _PROVIDER_UI_LABEL_OVERRIDES.get(provider_key, _s(provider))
 
 def _read_config_toml(path: str) -> dict:
     if tomllib is None:
@@ -1663,7 +2238,7 @@ def _normalize_field_item(item) -> dict | None:
     """
     item 支持：
     - "uid"
-    - { key="uid", label="UID", secret=false, placeholder="..." }
+    - { key="uid", label="UID", required=true, secret=false, placeholder="..." }
     """
     if isinstance(item, str):
         key = item.strip()
@@ -1675,7 +2250,24 @@ def _normalize_field_item(item) -> dict | None:
         }
     return None
 
-def _build_provider_ui_schema_from_config(config_path: str, section_name: str) -> dict:
+def _build_provider_schema(provider: str, label: str | None, fields: list[dict]) -> dict:
+    seen = set()
+    out = []
+    for f in fields:
+        k = str(f.get("key") or "").strip()
+        if not k or k in seen:
+            continue
+        seen.add(k)
+        out.append({
+            "key": k,
+            "label": f.get("label") or k,
+            "placeholder": f.get("placeholder") or f.get("label") or k,
+            "required": bool(f.get("required", False)),
+            "secret": bool(f.get("secret", False)),
+        })
+    return {"provider": provider, "label": label or provider, "fields": out}
+
+def _build_tts_ui_schema_from_config(config_path: str) -> dict:
     """
     返回：
     {
@@ -1686,43 +2278,22 @@ def _build_provider_ui_schema_from_config(config_path: str, section_name: str) -
     }
     """
     cfg = _read_config_toml(config_path)
-    tts = cfg.get(section_name, {})
+    tts = cfg.get("generate_voiceover", {})
 
     providers_out: list[dict] = []
 
-    # 格式：[<node>.providers.<provider>]
+    # 格式：[tts.providers.<provider>]
     providers = tts.get("providers")
     if isinstance(providers, dict):
         for provider, provider_cfg in providers.items():
             fields: list[dict] = []  
-            label = _get_provider_ui_label(section_name, provider, provider_cfg)
+            label = str(provider_cfg.get("label") or provider_cfg.get("name") or provider)
             for key in provider_cfg.keys():
-                key = str(key).strip()
-                if not key or key.lower() in _PROVIDER_UI_META_KEYS:
-                    continue
-                f = _normalize_field_item(key)
+                f = _normalize_field_item(str(key))
                 if f:
                     fields.append(f)
 
-            seen = set()
-            normalized_fields = []
-            for f in fields:
-                k = str(f.get("key") or "").strip()
-                if not k or k in seen:
-                    continue
-                seen.add(k)
-                normalized_fields.append({
-                    "key": k,
-                    "label": f.get("label") or k,
-                    "placeholder": f.get("placeholder") or f.get("label") or k,
-                    "secret": bool(f.get("secret", False)),
-                })
-
-            providers_out.append({
-                "provider": provider,
-                "label": label or provider,
-                "fields": normalized_fields,
-            })
+            providers_out.append(_build_provider_schema(provider, label, fields))
 
     return {"providers": providers_out}
 
@@ -1744,12 +2315,7 @@ async def node_map():
 
 @api.get("/meta/tts")
 async def get_tts_ui_schema():
-    schema = _build_provider_ui_schema_from_config(default_config_path(), "generate_voiceover")
-    return JSONResponse(schema)
-
-@api.get("/meta/ai_transition")
-async def get_ai_transition_ui_schema():
-    schema = _build_provider_ui_schema_from_config(default_config_path(), "generate_ai_transition")
+    schema = _build_tts_ui_schema_from_config(default_config_path())
     return JSONResponse(schema)
 
 # -------------------------
@@ -1778,13 +2344,13 @@ async def clear_session_chat(session_id: str):
         sess._attach_stats_msg_idx = 1
         sess.lc_messages = [
             SystemMessage(content=get_prompt("instruction.system", lang=sess.lang)),
-            SystemMessage(content="【User media upload status】{}"),
+            SystemMessage(content=UPLOAD_STATUS_SYSTEM_EMPTY),
         ]
         sess._attach_stats_msg_idx = 1
 
         sess.history = []
         sess._tool_history_index = {}
-        clear_ai_transition_cancelled(_ai_transition_cancel_cache_root(app.state.cfg), session_id)
+        await store.save_session_state(sess)
     return JSONResponse({"ok": True})
 
 @api.post("/sessions/{session_id}/cancel")
@@ -1797,7 +2363,6 @@ async def cancel_session_turn(session_id: str):
     store: SessionStore = app.state.sessions
     sess = await store.get_or_404(session_id)
     sess.cancel_event.set()
-    set_ai_transition_cancelled(_ai_transition_cancel_cache_root(app.state.cfg), session_id)
     return JSONResponse({"ok": True})
 
 # -------------------------
@@ -1840,6 +2405,8 @@ async def upload_media(session_id: str, request: Request, files: List[UploadFile
         finally:
             async with sess.media_lock:
                 sess._direct_upload_reservations = max(0, sess._direct_upload_reservations - n)
+
+        await store.save_session_state(sess)
 
         return JSONResponse({
             "media": [sess.public_media(m) for m in metas],
@@ -2023,6 +2590,8 @@ async def complete_resumable_media_upload(session_id: str, upload_id: str):
             sess.load_media[meta.id] = meta
             sess.pending_media_ids.append(meta.id)
 
+        await store.save_session_state(sess)
+
         return JSONResponse({
             "media": sess.public_media(meta),
             "pending_media": sess.public_pending_media(),
@@ -2067,6 +2636,7 @@ async def delete_pending_media(session_id: str, media_id: str):
     store: SessionStore = app.state.sessions
     sess = await store.get_or_404(session_id)
     await sess.delete_pending_media(media_id)
+    await store.save_session_state(sess)
     return JSONResponse({"ok": True, "pending_media": sess.public_pending_media()})
 
 
@@ -2240,11 +2810,17 @@ async def ws_chat(ws: WebSocket, session_id: str):
         await ws.accept()
 
         store: SessionStore = app.state.sessions
-        sess = await store.get(session_id)
+        try:
+            sess = await store.get(session_id)
+        except SessionStateUnavailableError:
+            try:
+                await ws.close(code=1013, reason="session state unavailable")
+            except Exception:
+                pass
+            return
         if not sess:
             await ws.close(code=4404, reason="session not found")
             return
-        sess = await store.get_or_404(session_id)
 
         await ws_send(ws, "session.snapshot", sess.snapshot())
 
@@ -2269,6 +2845,7 @@ async def ws_chat(ws: WebSocket, session_id: str):
                     if sess.client_context:
                         sess.client_context.lang = lang
 
+                    await store.save_session_state(sess)
                     await ws_send(ws, "session.lang", {"lang": lang})
                     continue
 
@@ -2278,11 +2855,12 @@ async def ws_chat(ws: WebSocket, session_id: str):
                         sess._attach_stats_msg_idx = 1
                         sess.lc_messages = [
                             SystemMessage(content=get_prompt("instruction.system", lang=sess.lang)),
-                            SystemMessage(content="【User media upload status】{}"),
+                            SystemMessage(content=UPLOAD_STATUS_SYSTEM_EMPTY),
                         ]
                         sess._attach_stats_msg_idx = 1
                         sess.history = []
                         sess._tool_history_index = {}
+                        await store.save_session_state(sess)
                     await ws_send(ws, "chat.cleared", {"ok": True})
                     continue
 
@@ -2349,8 +2927,7 @@ async def ws_chat(ws: WebSocket, session_id: str):
                     async with sess.chat_lock:
                         # 新 turn 开始：清掉上一次残留的 cancel 信号
                         sess.cancel_event.clear()
-                        clear_ai_transition_cancelled(_ai_transition_cancel_cache_root(app.state.cfg), session_id)
-                        # 0.0) 应用 service_config（自定义模型 / TTS / ai_transition）
+                        # 0.0) 应用 service_config（自定义模型 / TTS）
                         ok_cfg, err_cfg = sess.apply_service_config(data.get("service_config"))
                         if not ok_cfg:
                             await ws_send(ws, "error", {"message": err_cfg or "service_config invalid"})
@@ -2424,6 +3001,7 @@ async def ws_chat(ws: WebSocket, session_id: str):
                         }
                         sess.history.append(user_msg)
                         sess.lc_messages.append(HumanMessage(content=prompt))
+                        await store.save_session_state(sess)
 
                         if app.state.cfg.developer.print_context:
                             print("[LLM_CTX]", session_id, sess.lc_messages, flush=True)
@@ -2454,6 +3032,9 @@ async def ws_chat(ws: WebSocket, session_id: str):
                         async def pump_agent():
                             nonlocal new_messages
                             try:
+                                # Guard: ensure the messages list won't violate tool protocol after restore.
+                                # This prevents provider-side 400 like: "Messages with role 'tool' must be a response..."
+                                sess._sanitize_tool_protocol_in_lc_messages()
                                 stream = sess.agent.astream(
                                     {"messages": sess.lc_messages},
                                     context=sess.client_context,
@@ -2795,6 +3376,7 @@ async def ws_chat(ws: WebSocket, session_id: str):
                                         # ★打断：只发 assistant.end，带 interrupted=true
                                         await emit_turn_event("assistant.end", {"text": interrupted_text, "interrupted": True})
 
+                                        await store.save_session_state(sess)
                                         sess.cancel_event.clear()
                                         break
 
@@ -2858,6 +3440,7 @@ async def ws_chat(ws: WebSocket, session_id: str):
                                             sess.lc_messages.extend(new_messages)
 
                                         await emit_turn_event("assistant.end", {"text": final_text})
+                                        await store.save_session_state(sess)
                                         break
 
                                     if kind == "agent.error":
@@ -2879,6 +3462,7 @@ async def ws_chat(ws: WebSocket, session_id: str):
 
                                         # ★ 真异常：只发 error（并带 partial_text 让前端结束当前气泡）
                                         await emit_turn_event("error", {"message": err_text, "partial_text": partial})
+                                        await store.save_session_state(sess)
                                         break
                         
                         except WebSocketDisconnect:

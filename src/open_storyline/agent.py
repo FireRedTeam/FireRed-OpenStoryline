@@ -138,7 +138,6 @@ class ClientContext:
     vlm_model_key: str = ""  # VLM model key
     pexels_api_key: Optional[str] = None
     tts_config: Optional[dict] = None  # TTS config at runtime
-    ai_transition_config: Optional[dict] = None # AI transition config at runtime
     llm_pool: dict[tuple[str, bool], ChatOpenAI] = field(default_factory=dict)
     lang: str = "zh" # Default language: Chinese
 

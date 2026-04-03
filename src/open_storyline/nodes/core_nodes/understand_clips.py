@@ -21,7 +21,7 @@ class UnderstandClipsNode(BaseNode):
         node_kind="understand_clips",
         require_prior_kind=['load_media', 'split_shots'],
         default_require_prior_kind=['load_media', 'split_shots'],
-        next_available_node=['filter_clips'],
+        next_available_node=['filter_clips', 'filter_clips_pro'],
     )
 
     input_schema = UnderstandClipsInput

@@ -65,14 +65,6 @@ const __OS_I18N = {
     "sidebar.tts_default": "使用默认配置",
     "sidebar.tts_hint": "提示：字段留空将使用 config.toml 中的配置。",
     "sidebar.tts_field_suffix": "（留空则使用服务器默认）",
-    "sidebar.ai_transition_box_aria": "AI 转场服务配置",
-    "sidebar.ai_transition_title": "AI 转场配置",
-    "sidebar.ai_transition_provider_select_aria": "选择 AI 转场服务厂家",
-    "sidebar.ai_transition_default": "使用默认配置",
-    "sidebar.ai_transition_hint": "提示：字段填写不完整则将使用 config.toml 中的配置。",
-    "sidebar.ai_transition_warning_aria": "AI 转场资源消耗提示",
-    "sidebar.ai_transition_warning_title": "高资源消耗提示",
-    "sidebar.ai_transition_warning_body": "AI 转场会额外触发模型调用，资源消耗通常显著高于常规文案或配音流程，单条转场价格通常在0.5~4元之间，建议按需使用。",
     "sidebar.use_custom_model": "使用自定义模型",
     "sidebar.llm_label": "LLM 模型",
     "sidebar.vlm_label": "VLM 模型",
@@ -96,7 +88,6 @@ const __OS_I18N = {
     "sidebar.help.vlm": "VLM 用于素材理解（图像/视频理解）。自定义时请确认模型支持多模态输入。",
     "sidebar.help.pexels": "Pexels 用于搜索网络素材。免责声明：OpenStoryline 搜索的网络素材均来自Pexels，通过Pexels下载的素材仅用于体验Open-Storyline剪辑效果，不允许再分发或出售。我们只提供工具，所有通过本工具下载和使用的素材（如 Pexels 图像）都由用户自行通过 API 获取，我们不对用户生成的视频内容、素材的合法性或因使用本工具导致的任何版权/肖像权纠纷承担责任。使用时请遵循 Pexels 的许可协议。",
     "sidebar.help.tts": "用于从文案生成配音。",
-    "sidebar.help.ai_transition": "用于为片段之间生成 AI 转场。",
     "sidebar.help.pexels_home_link": "点击进入 Pexels 官方网站",
     "sidebar.help.pexels_terms_link": "查看 Pexels 用户协议",
 
@@ -188,14 +179,6 @@ const __OS_I18N = {
     "sidebar.tts_default": "Use default configuration",
     "sidebar.tts_hint": "Note: leaving fields empty will fall back to config.toml.",
     "sidebar.tts_field_suffix": " (leave empty to use server default)",
-    "sidebar.ai_transition_box_aria": "AI transition configuration",
-    "sidebar.ai_transition_title": "AI transition",
-    "sidebar.ai_transition_provider_select_aria": "Select an AI transition provider",
-    "sidebar.ai_transition_default": "Use default configuration",
-    "sidebar.ai_transition_hint": "Note: leaving fields empty will fall back to config.toml.",
-    "sidebar.ai_transition_warning_aria": "AI transition resource usage notice",
-    "sidebar.ai_transition_warning_title": "Higher resource usage",
-    "sidebar.ai_transition_warning_body": "AI transitions trigger additional model calls and usually consume significantly more resources than regular copywriting or voiceover workflows. The price for a single transition is typically between $0.1 and $0.5. We recommend using as needed.",
     "sidebar.use_custom_model": "Use custom model",
     "sidebar.llm_label": "LLM model",
     "sidebar.vlm_label": "VLM model",
@@ -219,7 +202,6 @@ const __OS_I18N = {
     "sidebar.help.vlm": "VLM is used for media understanding (image/video).",
     "sidebar.help.pexels": "Pexels is used for media search. Disclaimer: The online content searched by OpenStoryline is all from Pexels. Footage downloaded via Pexels is for the sole purpose of experiencing Open-Storyline editing effects and may not be redistributed or sold. We only provide the tool. All materials downloaded and used through this tool (such as Pexels images) are obtained by the user through the API. We are not responsible for the legality of user-generated video content or materials, or for any copyright/portrait rights disputes arising from the use of this tool. Please comply with the Pexels license agreement when using it.",
     "sidebar.help.tts": "TTS is used to generate voiceover from text.",
-    "sidebar.help.ai_transition": "Used to generate AI transitions between clips.",
     "sidebar.help.pexels_home_link": "Visit the official Pexels website",
     "sidebar.help.pexels_terms_link": "View Pexels Terms",
 
@@ -331,9 +313,9 @@ function __applyI18n(root = document) {
   });
 }
 
-// Provider 动态字段 placeholder（suffix）重渲染：
+// TTS 动态字段 placeholder（suffix）重渲染：
 // - 创建 input 时会写入 data-os-ph-base / data-os-ph-suffix
-function __rerenderProviderFieldPlaceholders(root = document) {
+function __rerenderTtsFieldPlaceholders(root = document) {
   root.querySelectorAll("input[data-os-ph-base]").forEach((el) => {
     const base = String(el.getAttribute("data-os-ph-base") || "");
     const needSuffix = el.getAttribute("data-os-ph-suffix") === "1";
@@ -473,7 +455,7 @@ function __applyLang(lang, { persist = true } = {}) {
   document.documentElement.lang = (v === "en") ? "en" : "zh-CN";
 
   __applyI18n(document);
-  __rerenderProviderFieldPlaceholders(document);
+  __rerenderTtsFieldPlaceholders(document);
   __osApplyHelpLinks(document);
   __osApplyTopbarLinks(document);
   __osApplyTooltipLinks(document);
@@ -522,8 +504,8 @@ class ApiClient {
     return await r.json();
   }
 
-  async getProviderUiSchema(kind) {
-    const r = await fetch(`/api/meta/${encodeURIComponent(kind)}`, { method: "GET" });
+  async getTtsUiSchema() {
+    const r = await fetch("/api/meta/tts", { method: "GET" });
     if (!r.ok) throw new Error(await this._readFetchError(r));
     return await r.json(); // { default_provider, providers:[...] }
   }
@@ -2397,35 +2379,11 @@ class App {
     this.customVlmBaseUrl = $("#customVlmBaseUrl");
     this.customVlmApiKey = $("#customVlmApiKey");
 
-    // Provider config UI
+    // TTS UI
     this.ttsBox = $("#ttsBox");
     this.ttsProviderSelect = $("#ttsProviderSelect");
     this.ttsProviderFieldsHost = $("#ttsProviderFields");
-    this.aiTransitionBox = $("#aiTransitionBox");
-    this.aiTransitionProviderSelect = $("#aiTransitionProviderSelect");
-    this.aiTransitionProviderFieldsHost = $("#aiTransitionProviderFields");
-    this.providerUiSchemas = {
-      tts: null,
-      ai_transition: null,
-    };
-    this.providerPanels = {
-      tts: {
-        box: this.ttsBox,
-        select: this.ttsProviderSelect,
-        host: this.ttsProviderFieldsHost,
-        persistPrefix: "sidebar.tts",
-        defaultTextKey: "sidebar.tts_default",
-        showDefaultOption: true,
-      },
-      ai_transition: {
-        box: this.aiTransitionBox,
-        select: this.aiTransitionProviderSelect,
-        host: this.aiTransitionProviderFieldsHost,
-        persistPrefix: "sidebar.ai_transition",
-        defaultTextKey: "sidebar.ai_transition_default",
-        showDefaultOption: false,
-      },
-    };
+    this.ttsUiSchema = null;
 
     // Pexels UI
     this.pexelsBox = $("#pexelsBox");
@@ -2560,8 +2518,7 @@ class App {
     this.ui.bindModalClose();
     this.bindUI();
     this._setLang(this.lang, { persist: false, syncServer: false });
-    await this.loadProviderUiSchema("tts");
-    await this.loadProviderUiSchema("ai_transition");
+    await this.loadTtsUiSchema();
 
     // 先加载本地会话列表
     this.sessionHistory = this._loadSessionHistory();
@@ -3053,39 +3010,29 @@ class App {
     }, 160);
   }
 
-  _getProviderPanel(kind) {
-    return this.providerPanels?.[kind] || null;
-  }
-
-  async loadProviderUiSchema(kind) {
-    const panel = this._getProviderPanel(kind);
-    if (!panel) return;
-
+  async loadTtsUiSchema() {
     let schema = null;
     try {
-      schema = await this.api.getProviderUiSchema(kind);
+      schema = await this.api.getTtsUiSchema();
     } catch (e) {
-      console.warn(`[${kind}] failed to load /api/meta/${kind}:`, e);
+      console.warn("[tts] failed to load /api/meta/tts:", e);
     }
 
-    this.providerUiSchemas[kind] = schema;
-    this._renderProviderUiFromSchema(kind, schema);
+    this.ttsUiSchema = schema;
+    this._renderTtsUiFromSchema(schema);
   }
 
-  _renderProviderUiFromSchema(kind, schema) {
-    const panel = this._getProviderPanel(kind);
-    if (!panel || !panel.select || !panel.host) return;
+  _renderTtsUiFromSchema(schema) {
+    if (!this.ttsProviderSelect || !this.ttsProviderFieldsHost) return;
 
     const providers = (schema && Array.isArray(schema.providers)) ? schema.providers : [];
-    const before = String(panel.select.value || "").trim();
+    const before = String(this.ttsProviderSelect.value || "").trim();
 
-    panel.select.innerHTML = "";
-    if (panel.showDefaultOption) {
-      const opt0 = document.createElement("option");
-      opt0.value = "";
-      opt0.textContent = __t(panel.defaultTextKey);
-      panel.select.appendChild(opt0);
-    }
+    this.ttsProviderSelect.innerHTML = "";
+    const opt0 = document.createElement("option");
+    opt0.value = "";
+    opt0.textContent = __t("sidebar.tts_default");
+    this.ttsProviderSelect.appendChild(opt0);
 
     for (const v of providers) {
       const provider = String(v?.provider || "").trim();
@@ -3095,10 +3042,10 @@ class App {
       const opt = document.createElement("option");
       opt.value = provider;
       opt.textContent = label;
-      panel.select.appendChild(opt);
+      this.ttsProviderSelect.appendChild(opt);
     }
 
-    panel.host.innerHTML = "";
+    this.ttsProviderFieldsHost.innerHTML = "";
 
     for (const v of providers) {
       const provider = String(v?.provider || "").trim();
@@ -3106,8 +3053,7 @@ class App {
 
       const block = document.createElement("div");
       block.className = "sidebar-tts-fields hidden";
-      block.dataset.providerKind = kind;
-      block.dataset.providerName = provider;
+      block.dataset.ttsProvider = provider;
 
       const fields = Array.isArray(v?.fields) ? v.fields : [];
 
@@ -3117,7 +3063,7 @@ class App {
 
         const label = String(f?.label || key).trim();
 
-        // const required = !!f?.required;
+        const required = !!f?.required;
         const secret = !!f?.secret;
 
         const input = document.createElement("input");
@@ -3133,29 +3079,26 @@ class App {
         const ph = needSuffix ? `${basePh}${__t("sidebar.tts_field_suffix")}` : basePh;
         input.placeholder = ph;
 
-        input.setAttribute("data-os-persist", `${panel.persistPrefix}.${provider}.${key}`);
+        input.setAttribute("data-os-persist", `sidebar.tts.${provider}.${key}`);
 
-        input.dataset.providerKey = key;
+        input.dataset.ttsKey = key;
 
         block.appendChild(input);
       }
 
-      panel.host.appendChild(block);
+      this.ttsProviderFieldsHost.appendChild(block);
     }
 
-    try { __osHydratePersistedFields(panel.box || document); } catch {}
-    try { __osBindPersistedFields(panel.box || document); } catch {}
+    try { __osHydratePersistedFields(this.ttsBox || document); } catch {}
+    try { __osBindPersistedFields(this.ttsBox || document); } catch {}
 
     if (before) {
-      panel.select.value = before;
-    } else if (!panel.showDefaultOption && providers.length > 0) {
-      const firstProvider = String(providers[0]?.provider || "").trim();
-      panel.select.value = firstProvider;
+      this.ttsProviderSelect.value = before;
     } else {
-      panel.select.value = "";
+      this.ttsProviderSelect.value = "";
     }
 
-    try { panel.select.dispatchEvent(new Event("change", { bubbles: true })); } catch {}
+    try { this.ttsProviderSelect.dispatchEvent(new Event("change", { bubbles: true })); } catch {}
   }
 
   // restoreSidebarState() {
@@ -3279,14 +3222,12 @@ class App {
     apply(this.llmSelect);
     apply(this.vlmSelect);
 
-    ["tts", "ai_transition"].forEach((kind) => {
-      const panel = this._getProviderPanel(kind);
-      if (!panel?.select || !panel.showDefaultOption) return;
-      const opt0 = panel.select.querySelector('option[value=""]');
-      if (opt0) opt0.textContent = __t(panel.defaultTextKey);
-    });
+    if (this.ttsProviderSelect) {
+      const opt0 = this.ttsProviderSelect.querySelector('option[value=""]');
+      if (opt0) opt0.textContent = __t("sidebar.tts_default");
+    }
 
-    __rerenderProviderFieldPlaceholders(document);
+    __rerenderTtsFieldPlaceholders(document);
   }
 
   _pushLangToServer() {
@@ -3370,16 +3311,17 @@ class App {
     if (this.customLlmSection) this.customLlmSection.classList.toggle("hidden", !llmCustom);
     if (this.customVlmSection) this.customVlmSection.classList.toggle("hidden", !vlmCustom);
 
-    ["tts", "ai_transition"].forEach((kind) => {
-      const panel = this._getProviderPanel(kind);
-      if (!panel?.host) return;
-      const provider = panel.select ? String(panel.select.value || "").trim() : "";
+    const provider = (this.ttsProviderSelect && this.ttsProviderSelect.value)
+      ? String(this.ttsProviderSelect.value).trim()
+      : "";
 
-      panel.host.querySelectorAll(`[data-provider-kind="${kind}"][data-provider-name]`).forEach((el) => {
-        const v = String(el.dataset.providerName || "");
+    const host = this.ttsProviderFieldsHost || $("#ttsProviderFields");
+    if (host) {
+      host.querySelectorAll("[data-tts-provider]").forEach((el) => {
+        const v = String(el.dataset.ttsProvider || "");
         el.classList.toggle("hidden", !provider || v !== provider);
       });
-    });
+    }
 
     // ---- Pexels custom key show/hide ----
     const pMode = (this.pexelsKeyModeSelect && this.pexelsKeyModeSelect.value)
@@ -3422,21 +3364,21 @@ class App {
   }
 
 
-  _readProviderConfigFromUI(kind) {
-    const panel = this._getProviderPanel(kind);
-    if (!panel?.select) return null;
-
-    const provider = String(panel.select.value || "").trim();
+  _readTtsConfigFromUI() {
+    const provider = (this.ttsProviderSelect && this.ttsProviderSelect.value)
+      ? String(this.ttsProviderSelect.value).trim()
+      : "";
     if (!provider) return null;
 
+    const host = this.ttsProviderFieldsHost || $("#ttsProviderFields");
     const params = {};
 
-    if (panel.host) {
-      const block = panel.host.querySelector(`[data-provider-kind="${kind}"][data-provider-name="${provider}"]`);
+    if (host) {
+      const block = host.querySelector(`[data-tts-provider="${provider}"]`);
       if (block) {
-        const fields = block.querySelectorAll("input[data-provider-key], select[data-provider-key], textarea[data-provider-key]");
+        const fields = block.querySelectorAll("input[data-tts-key], select[data-tts-key], textarea[data-tts-key]");
         fields.forEach((el) => {
-          const k = String(el.dataset.providerKey || "").trim();
+          const k = String(el.dataset.ttsKey || "").trim();
           if (!k) return;
           const v = String(el.value ?? "").trim();
           if (v !== "") params[k] = v; 
@@ -3485,11 +3427,8 @@ class App {
       if (needVlmCustom) rc.custom_models.vlm = cm.vlm;
     }
 
-    const tts = this._readProviderConfigFromUI("tts");
+    const tts = this._readTtsConfigFromUI();
     if (tts) rc.tts = tts;
-
-    const aiTransition = this._readProviderConfigFromUI("ai_transition");
-    if (aiTransition) rc.ai_transition = aiTransition;
 
     const pexels = this._readPexelsConfigFromUI();
     if (pexels) {
@@ -3683,11 +3622,9 @@ class App {
       });
     }
 
-    ["tts", "ai_transition"].forEach((kind) => {
-      const panel = this._getProviderPanel(kind);
-      if (!panel?.select) return;
-      panel.select.addEventListener("change", () => this._syncConfigPanels());
-    });
+    if (this.ttsProviderSelect) {
+      this.ttsProviderSelect.addEventListener("change", () => this._syncConfigPanels());
+    }
 
     if (this.pexelsKeyModeSelect) {
       this.pexelsKeyModeSelect.addEventListener("change", () => this._syncConfigPanels());
