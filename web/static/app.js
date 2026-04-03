@@ -487,6 +487,26 @@ function __applyLang(lang, { persist = true } = {}) {
 })();
 
 
+/** Thrown by ApiClient for HTTP failures; callers use `status` (e.g. 404 vs transient). */
+class HttpError extends Error {
+  constructor(message, status) {
+    super(message);
+    this.name = "HttpError";
+    this.status = status;
+  }
+}
+
+/** GET /api/sessions/:id — 404 means this id is not valid on the server; safe to drop local pointer. */
+function isSessionNotFoundError(err) {
+  return !!(err && err.status === 404);
+}
+
+/** Network failure or 5xx (incl. 503 session state unavailable); may retry — not "session gone". */
+function isRetryableSessionLoadError(err) {
+  const st = err && err.status;
+  return st == null || st === 0 || (Number(st) >= 500 && Number(st) < 600);
+}
+
 class ApiClient {
   async createSession() {
     const r = await fetch("/api/sessions", { method: "POST" });
@@ -497,9 +517,7 @@ class ApiClient {
   async getSession(sessionId) {
     const r = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`);
     if (!r.ok) {
-      const err = new Error(await this._readFetchError(r));
-      err.status = r.status;
-      throw err;
+      throw new HttpError(await this._readFetchError(r), r.status);
     }
     return await r.json();
   }
@@ -2501,6 +2519,41 @@ class App {
     return `${proto}://${location.host}/ws/sessions/${encodeURIComponent(sessionId)}/chat`;
   }
 
+  /**
+   * Restore `saved` session id from the server. Retries transient failures so a short
+   * network blip does not immediately fall through to `newSession()` (which would
+   * overwrite SESSION_ID_KEY with a new id).
+   * @returns {Promise<boolean>} true if session was restored
+   */
+  async _bootstrapRestoreSavedSession(saved) {
+    const maxAttempts = 3;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        const snap = await this.api.getSession(saved);
+        await this.useSession(saved, snap);
+        return true;
+      } catch (err) {
+        if (isSessionNotFoundError(err)) {
+          localStorage.removeItem(SESSION_ID_KEY);
+          this._removeSessionFromHistory(saved);
+          this._renderSessionHistory();
+          return false;
+        }
+        if (attempt < maxAttempts - 1 && isRetryableSessionLoadError(err)) {
+          await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+          continue;
+        }
+        console.warn(
+          "[session] failed to restore saved session (non-404), keep local record:",
+          saved,
+          err
+        );
+        return false;
+      }
+    }
+    return false;
+  }
+
   async bootstrap() {
     // this.restoreSidebarState();
     // this.restoreDevbarState();
@@ -2517,20 +2570,8 @@ class App {
     // 复用 localStorage 当前会话；如果失效就创建新 session
     const saved = localStorage.getItem(SESSION_ID_KEY);
     if (saved) {
-      try {
-        const snap = await this.api.getSession(saved);
-        await this.useSession(saved, snap);
-        return;
-      } catch (err) {
-        // 仅当明确 404（会话不存在）时才清理本地记录；其它错误（例如网络抖动）不要误删
-        if (err && err.status === 404) {
-          localStorage.removeItem(SESSION_ID_KEY);
-          this._removeSessionFromHistory(saved);
-          this._renderSessionHistory();
-        } else {
-          console.warn("[session] failed to restore saved session (non-404), keep local record:", saved, err);
-        }
-      }
+      const restored = await this._bootstrapRestoreSavedSession(saved);
+      if (restored) return;
     }
 
     await this.newSession();
@@ -3609,7 +3650,7 @@ class App {
         } catch (err) {
           console.warn("[session] failed to restore session", sid, err);
           // 仅当明确 404（会话不存在）时才清理本地记录；其它错误不要误删
-          if (err && err.status === 404) {
+          if (isSessionNotFoundError(err)) {
             this._handleMissingSessionOnClick(sid);
             return;
           }
@@ -3955,7 +3996,7 @@ class App {
       } catch (e) {
         console.warn("[session] failed to reuse blank session, will create new one:", e);
         // 仅当明确 404 时才清理本地记录；其它错误不要误删
-        if (e && e.status === 404) {
+        if (isSessionNotFoundError(e)) {
           this._removeSessionFromHistory(blankId);
           this._renderSessionHistory(this.sessionId);
         }

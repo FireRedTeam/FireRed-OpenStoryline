@@ -44,10 +44,10 @@ available_node_pkgs = [
     "open_storyline.nodes.core_nodes"
 ]
 available_nodes = [
-    "LoadMediaNode", "SearchMediaNode", "SplitShotsNode", "LocalASRNode", "SpeechRoughCutNode", "GenerateAITransitionNode", 
+    "LoadMediaNode", "SearchMediaNode", "SplitShotsNode", "LocalASRNode", "SpeechRoughCutNode",
     "UnderstandClipsNode", "FilterClipsNode", "GroupClipsNode", "GenerateScriptNode", "ScriptTemplateRecomendation",
     "GenerateVoiceoverNode", "SelectBGMNode", "RecommendTransitionNode", "RecommendTextNode",
-    "PlanTimelineProNode", "PlanTimelineAITransitionNode", "RenderVideoNode"
+    "PlanTimelineProNode", "RenderVideoNode"
 ]
 
 # =========== skills ==========
