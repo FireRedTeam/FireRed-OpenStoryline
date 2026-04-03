@@ -11,17 +11,17 @@ outputs_dir = "./outputs"
 
 # ============= 模型配置 for user / Model Config for User =============
 [llm]
-model = "deepseek-chat"
-base_url = "https://api.deepseek.com/v1"
-api_key = "sk-f757c986aca4404a9b3258e9edae03db" 
+model = ""
+base_url = ""
+api_key = "" 
 timeout = 30.0 # 单位：秒
 temperature = 0.1
 max_retries = 2
 
 [vlm]
-model = "glm-4.6v"
-base_url = "https://open.bigmodel.cn/api/paas/v4/"
-api_key = "7137d98c4c1a498d88bdce7d89a54e3c.1k5fbyB69QykG8mC" 
+model = ""
+base_url = ""
+api_key = "" 
 timeout = 20.0 # 单位：秒
 temperature = 0.1
 max_retries = 2
@@ -44,10 +44,10 @@ available_node_pkgs = [
     "open_storyline.nodes.core_nodes"
 ]
 available_nodes = [
-    "LoadMediaNode", "SearchMediaNode", "SplitShotsNode", "LocalASRNode", "SpeechRoughCutNode",
+    "LoadMediaNode", "SearchMediaNode", "SplitShotsNode", "LocalASRNode", "SpeechRoughCutNode", "GenerateAITransitionNode", 
     "UnderstandClipsNode", "FilterClipsNode", "GroupClipsNode", "GenerateScriptNode", "ScriptTemplateRecomendation",
     "GenerateVoiceoverNode", "SelectBGMNode", "RecommendTransitionNode", "RecommendTextNode",
-    "PlanTimelineProNode", "RenderVideoNode"
+    "PlanTimelineProNode", "PlanTimelineAITransitionNode", "RenderVideoNode"
 ]
 
 # =========== skills ==========
@@ -56,7 +56,7 @@ skill_dir = "./.storyline/skills"
 
 # =========== pexels ==========
 [search_media]
-pexels_api_key = "Kol2h4OTgRvFo2gdTW5QFQM2T1lZF95zx76R9voCS3syS5aImzylS6X6"
+pexels_api_key = ""
 
 # ============= 镜头分割 / Shot Segmentation =============
 [split_shots]
@@ -96,6 +96,18 @@ access_token = ""
 
 [generate_voiceover.providers.minimax]
 base_url = ""
+api_key = ""
+
+
+# ============= AI 转场生成 / AI transition generation ===================
+[generate_ai_transition]
+
+[generate_ai_transition.providers.dashscope] # 阿里通义万相 / Alibaba’s Tongyi Wanxiang (Wan) video model
+model_name = ""
+api_key = ""
+
+[generate_ai_transition.providers.minimax] # Minimax 海螺 / Hailuo
+model_name = ""
 api_key = ""
 
 
@@ -148,13 +160,3 @@ short_text_margin_rate  = 0.0       # 短文本起始边距率 / short text star
 
 text_duration_mode = "with_tts"     # with_tts | with_clip (随配音 | 随片段)
 is_text_beats      = false          # 文字对齐音乐节拍 / align text with music beats
-# ============= AI transition generation ===================
-[generate_ai_transition]
-
-[generate_ai_transition.providers.dashscope]
-model_name = ""
-api_key = ""
-
-[generate_ai_transition.providers.minimax]
-model_name = ""
-api_key = ""
