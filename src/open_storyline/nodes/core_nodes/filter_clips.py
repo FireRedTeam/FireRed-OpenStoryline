@@ -18,7 +18,7 @@ class FilterClipsNode(BaseNode):
         node_kind="filter_clips",
         require_prior_kind=['split_shots','understand_clips'],
         default_require_prior_kind=['split_shots','understand_clips'],
-        next_available_node=['group_clips', 'group_clips_pro'],
+        next_available_node=['group_clips'],
     )
 
     input_schema = FilterClipsInput
