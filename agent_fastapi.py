@@ -1124,9 +1124,13 @@ class ChatSession:
         if not sys:
             return
 
-        for m in self.lc_messages:
-            if isinstance(m, SystemMessage) and (getattr(m, "content", "") or "").strip() == sys:
+        if self.lc_messages and isinstance(self.lc_messages[0], SystemMessage):
+            current = self.lc_messages[0].content
+            current = current if isinstance(current, str) else str(current)
+            if current.strip() == sys:
                 return
+            self.lc_messages[0] = SystemMessage(content=sys)
+            return
 
         self.lc_messages.insert(0, SystemMessage(content=sys))
 
