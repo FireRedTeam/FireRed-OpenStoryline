@@ -215,6 +215,7 @@ sh build_env.sh
     ```bash
     pip install -r requirements.txt
     ```
+    如果你计划使用 `storyline.local_asr`，请确认当前环境已安装 `torchaudio`。
 
 ###### B. Windows
   - Step 1: 准备目录：在项目根目录下新建目录 `resource`。
@@ -228,6 +229,7 @@ sh build_env.sh
     ```bash
     pip install -r requirements.txt
     ```
+    如果你计划使用 `storyline.local_asr`，请确认当前环境已安装 `torchaudio`。
 
 
 ## 🚀 快速开始

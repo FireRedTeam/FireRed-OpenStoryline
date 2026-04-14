@@ -21,3 +21,4 @@ faiss-cpu==1.13.2
 openai==2.16.0
 emoji==2.15.0
 funasr==1.3.1
+torchaudio==2.11.0
