@@ -64,8 +64,14 @@ models/
 project/
 
 # 环境/配置的敏感信息（你如果用 .env 管 secret）
+.env
 .env.local
 .env.*.local
+
+# 本机开发运行状态 / Runtime artifacts
+.storyline/dev_runtime/
+output/
+test-results/
 
 data/**
 !data/elements_v2/

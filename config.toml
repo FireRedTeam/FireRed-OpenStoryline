@@ -26,6 +26,35 @@ timeout = 20.0 # 单位：秒
 temperature = 0.1
 max_retries = 2
 
+# ============= 前端 Provider 设置 / Frontend Provider Settings =============
+# 前端只负责选择 provider 和 model；API key 优先从环境变量 / .env.local 读取。
+# Do not commit real provider secrets here.
+[model_providers.openai]
+api_key = ""
+base_url = "https://api.openai.com/v1"
+
+[model_providers.gemini]
+api_key = ""
+base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
+
+[model_providers.nvidia]
+api_key = ""
+base_url = "https://integrate.api.nvidia.com/v1"
+
+[model_providers.ollama]
+api_key = ""
+base_url = "http://127.0.0.1:11434/v1"
+
+# ============= Codex Auth / ChatGPT Plan =================
+[codex]
+enabled = true
+binary = "codex"
+default_login_flow = "device_code"
+default_model = "gpt-5.4"
+available_models = ["gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex-spark", "gpt-5.2"]
+sandbox = "read-only"
+approval_policy = "never"
+
 # ============= MCP Server 相关 / MCP Server Related =============
 [local_mcp_server]
 server_name = "storyline"
@@ -98,6 +127,16 @@ access_token = ""
 base_url = ""
 api_key = ""
 
+[generate_voiceover.providers.localai]
+label = "Local-ai-platform"
+mode = "gateway"
+base_url = "http://127.0.0.1:18080"
+api_key = ""
+voice_provider = "voxcpm"
+voice_id = "default"
+format = "wav"
+sample_rate_hz = 24000
+
 
 # ============= AI 转场生成 / AI transition generation ===================
 [generate_ai_transition]
@@ -117,6 +156,15 @@ api_key = ""
 sample_rate = 22050
 hop_length = 2048   # 每次分析窗口向前跳多少个采样点，越小越精细（但更慢） / Hop length samples; smaller = more precise but slower
 frame_length = 2048 # 计算信号的均方根RMS的窗口大小。越大越稳定，但对瞬态不敏感 / Window size for RMS; larger = stable but less sensitive to transients
+
+[select_bgm.providers.localai]
+label = "Local-ai-platform"
+mode = "gateway"
+base_url = "http://127.0.0.1:18080"
+api_key = ""
+duration_seconds = 12
+instrumental = true
+bpm = 120
 
 # ============= 字体推荐 / Font Recommendation ====================
 [recommend_text]

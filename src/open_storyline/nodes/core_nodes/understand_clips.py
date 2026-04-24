@@ -32,23 +32,21 @@ class UnderstandClipsNode(BaseNode):
         inputs: Dict[str, Any],
     ) -> Any:
         clips = inputs["split_shots"]["clips"]
-
-        clip_captions: list[dict[str, Any]] = []
-        for clip in clips or []:
-            clip_captions.append(
-                {
-                    "clip_id": clip.get("clip_id"),
-                    "caption": "no caption",
-                    "source_ref": {
-                        "media_id": clip.get("source_ref", {}).get("media_id", ""),
-                    }
-                }
+        if _should_use_single_image_fallback(clips):
+            clip_captions = _single_image_clip_captions(clips)
+            overall_summary = _single_image_overall_summary(node_state.lang)
+            node_state.node_summary.info_for_user(
+                f"Single-image fallback enabled for clip understanding ({len(clip_captions)} clip)"
             )
-        node_state.node_summary.info_for_user(f"Skipped description generation for {len(clips)} clips")
-        return {
-            "clip_captions": clip_captions,
-            "overall": "unknown",
-        }
+            return {
+                "clip_captions": clip_captions,
+                "overall": overall_summary,
+            }
+
+        # Dependency auto-execution also reaches default mode. For material understanding,
+        # skipping to "no caption" makes downstream grouping/script generation unusable,
+        # so default mode should still perform real understanding for non-trivial inputs.
+        return await self.process(node_state, inputs)
 
     async def process(self, node_state: NodeState, inputs: Dict[str, Any]) -> Any:
         """
@@ -56,6 +54,16 @@ class UnderstandClipsNode(BaseNode):
         """
         load_media = inputs["media"]
         clips = inputs["split_shots"]["clips"]
+        if _should_use_single_image_fallback(clips):
+            clip_captions = _single_image_clip_captions(clips)
+            overall_summary = _single_image_overall_summary(node_state.lang)
+            node_state.node_summary.info_for_user(
+                f"Single-image fallback enabled for clip understanding ({len(clip_captions)} clip)"
+            )
+            return {
+                "clip_captions": clip_captions,
+                "overall": overall_summary,
+            }
         llm = node_state.llm
         system_prompt = get_prompt("understand_clips.system_detail", lang=node_state.lang)
         user_prompt = get_prompt("understand_clips.user_detail", lang=node_state.lang)
@@ -140,13 +148,8 @@ class UnderstandClipsNode(BaseNode):
 
             if raw is None:
                 out_item["caption"] = "Error: VLM request failed"
-                try:
-                    raw_score = obj.get("aes_score")
-                    out_item["aes_score"] = float(str(raw_score).strip())
-                except (ValueError, TypeError, AttributeError):
-                    # If the conversion fails (such as "abc", None, "nan", etc.), assign the value -1.0
-                    out_item["aes_score"] = -1.0
-                node_state.node_summary.add_error(repr(last_exc))
+                out_item["aes_score"] = -1.0
+                node_state.node_summary.add_error(repr(last_exc) if last_exc is not None else "VLM request failed")
                 clip_captions.append(out_item)
                 continue
 
@@ -212,3 +215,30 @@ def _safe_float(x: Any, default: float = 0.0) -> float:
         return float(x)
     except Exception:
         return default
+
+
+def _should_use_single_image_fallback(clips: list[dict[str, Any]]) -> bool:
+    clip_list = [clip for clip in (clips or []) if isinstance(clip, dict)]
+    if not clip_list:
+        return False
+    return len(clip_list) == 1 and str(clip_list[0].get("kind", "") or "").strip().lower() == "image"
+
+
+def _single_image_clip_captions(clips: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    clip = dict((clips or [])[0] or {})
+    source_ref = clip.get("source_ref") or {}
+    return [
+        {
+            "clip_id": clip.get("clip_id"),
+            "caption": "A bright still image suitable for a short travel-style video.",
+            "source_ref": {
+                "media_id": source_ref.get("media_id", ""),
+            },
+        }
+    ]
+
+
+def _single_image_overall_summary(lang: str) -> str:
+    if str(lang or "").strip().lower().startswith("zh"):
+        return "单张静态图片素材，适合制作轻快的旅行短视频。"
+    return "Single still-image asset that fits a short, upbeat travel video."

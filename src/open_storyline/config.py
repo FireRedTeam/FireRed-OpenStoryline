@@ -107,6 +107,29 @@ class VLMConfig(ConfigBaseModel):
     max_retries: int = 2
 
 
+class ModelProviderConfig(ConfigBaseModel):
+    api_key: str = ""
+    base_url: str = ""
+
+
+class CodexConfig(ConfigBaseModel):
+    enabled: bool = True
+    binary: str = "codex"
+    default_login_flow: Literal["device_code", "browser"] = "device_code"
+    default_model: str = "gpt-5.4"
+    default_reasoning_effort: Literal["none", "minimal", "low", "medium", "high", "xhigh"] = "medium"
+    available_models: List[str] = Field(
+        default_factory=lambda: [
+            "gpt-5.4",
+            "gpt-5.4-mini",
+            "gpt-5.3-codex-spark",
+            "gpt-5.2",
+        ]
+    )
+    sandbox: Literal["read-only", "workspace-write", "danger-full-access"] = "read-only"
+    approval_policy: Literal["never", "on-request", "on-failure", "untrusted"] = "never"
+
+
 class MCPConfig(ConfigBaseModel):
     server_name: str = "storyline"
     server_cache_dir: str = "./storyline/.server_cache"
@@ -164,6 +187,7 @@ class SelectBGMConfig(ConfigBaseModel):
     sample_rate: int = 22050
     hop_length: int = 2048
     frame_length: int = 2048
+    providers: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 class RecommendTextConfig(ConfigBaseModel):
     font_info_path: Path = Field(..., description="Font info path.")
@@ -244,6 +268,8 @@ class Settings(ConfigBaseModel):
 
     llm: LLMConfig
     vlm: VLMConfig
+    model_providers: dict[str, ModelProviderConfig] = Field(default_factory=dict)
+    codex: CodexConfig = Field(default_factory=CodexConfig)
 
     local_mcp_server: MCPConfig
 

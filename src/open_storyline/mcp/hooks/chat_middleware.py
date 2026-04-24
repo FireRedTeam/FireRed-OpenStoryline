@@ -38,6 +38,18 @@ def reset_mcp_log_sink(token):
     _MCP_LOG_SINK.reset(token)
 
 
+def get_mcp_log_sink() -> Optional[Callable[[dict], None]]:
+    return _MCP_LOG_SINK.get()
+
+
+def set_active_tool_call_id(tool_call_id: str | None):
+    return _MCP_ACTIVE_TOOL_CALL_ID.set(tool_call_id)
+
+
+def reset_active_tool_call_id(token):
+    _MCP_ACTIVE_TOOL_CALL_ID.reset(token)
+
+
 def _norm_url(u: str) -> str:
     u = (u or "").strip()
     return u.rstrip("/") if u else u

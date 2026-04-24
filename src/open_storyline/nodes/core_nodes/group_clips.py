@@ -36,6 +36,11 @@ class GroupClipsNode(BaseNode):
         selected_clips = inputs["filter_clips"].get("selected")
         user_request = inputs["user_request"]
 
+        if len(selected_clips or []) <= 1:
+            result = _make_single_group_fallback(selected_clips or [])
+            node_state.node_summary.info_for_user("Single-image fallback enabled for clip grouping")
+            return {"groups": result}
+
         llm = node_state.llm
         clip_lookup = _build_clip_lookup(clip_captions)
 

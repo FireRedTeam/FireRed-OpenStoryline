@@ -58,6 +58,66 @@
             <!-- JS 渲染历史会话 -->
           </div>
         </div>
+      <div id="codexAuthBox" class="sidebar-panel" aria-label="Codex Auth">
+        <div class="sidebar-panel-title">
+          <span class="sidebar-panel-title-text" data-i18n="sidebar.codex_title">Codex Auth</span>
+        </div>
+        <div id="codexAuthStatus" class="sidebar-hint" data-i18n="sidebar.codex_status_loading">正在读取 Codex 登录状态…</div>
+        <div id="codexRateLimits" class="sidebar-hint hidden"></div>
+        <div id="codexLoginResult" class="sidebar-hint hidden"></div>
+        <div class="sidebar-fields">
+          <button id="codexLoginDeviceBtn" type="button" class="sidebar-action">
+            <span class="sidebar-action-text" data-i18n="sidebar.codex_login_device">使用裝置碼登入</span>
+          </button>
+          <button id="codexLoginBrowserBtn" type="button" class="sidebar-action">
+            <span class="sidebar-action-text" data-i18n="sidebar.codex_login_browser">用 ChatGPT 登入</span>
+          </button>
+          <button id="codexRefreshBtn" type="button" class="sidebar-action">
+            <span class="sidebar-action-text" data-i18n="sidebar.codex_refresh">刷新狀態</span>
+          </button>
+          <button id="codexLogoutBtn" type="button" class="sidebar-action hidden">
+            <span class="sidebar-action-text" data-i18n="sidebar.codex_logout">登出</span>
+          </button>
+        </div>
+        <div class="sidebar-fields">
+          <div class="sidebar-divider"></div>
+          <div class="sidebar-subtitle" data-i18n="sidebar.codex_model_label">Codex 模型</div>
+          <select id="codexModelSelect" class="sidebar-model-select"
+                  aria-label="选择 Codex 模型"
+                  data-i18n-aria-label="sidebar.codex_model_select_aria"
+                  data-os-persist="sidebar.codex.model">
+            <option value="" data-i18n="sidebar.codex_model_loading">正在读取模型…</option>
+          </select>
+          <div class="sidebar-subtitle" data-i18n="sidebar.codex_reasoning_label">Reasoning 程度</div>
+          <select id="codexReasoningSelect" class="sidebar-model-select"
+                  aria-label="选择 reasoning 程度"
+                  data-i18n-aria-label="sidebar.codex_reasoning_select_aria"
+                  data-os-persist="sidebar.codex.reasoning_effort">
+            <option value="" data-i18n="sidebar.codex_reasoning_loading">正在读取推理档位…</option>
+          </select>
+        </div>
+        <div class="sidebar-hint" data-i18n="sidebar.codex_hint">
+          使用官方 Codex auth 後，可把 ChatGPT 方案內的模型直接當成 LLM/VLM 使用。
+        </div>
+      </div>
+      <div id="runtimeStatusBox" class="sidebar-panel" aria-label="运行状态"
+           data-i18n-aria-label="sidebar.runtime_box_aria">
+        <div class="sidebar-panel-title">
+          <span class="sidebar-panel-title-text" data-i18n="sidebar.runtime_title">运行状态</span>
+        </div>
+        <div class="sidebar-subtitle" data-i18n="sidebar.runtime_profile_label">当前开发 profile</div>
+        <div id="runtimeProfileBadge" class="runtime-profile-badge">Codex + LocalAI</div>
+        <div id="runtimeProfileDetails" class="runtime-profile-details"></div>
+        <div class="sidebar-fields">
+          <button id="runtimeHealthRefreshBtn" type="button" class="sidebar-action">
+            <span class="sidebar-action-text" data-i18n="sidebar.runtime_refresh">刷新运行状态</span>
+          </button>
+        </div>
+        <div id="runtimeHealthList" class="runtime-health-list">
+          <div class="sidebar-hint" data-i18n="sidebar.runtime_loading">正在读取运行状态…</div>
+        </div>
+        <div id="runtimeHealthWarnings" class="runtime-warning-list hidden"></div>
+      </div>
       <!-- LLM 配置：卡片包住 下拉框 + 自定义字段 -->
       <div id="llmBox" class="sidebar-panel" aria-label="LLM 配置">
         <div class="sidebar-panel-title">
@@ -88,21 +148,13 @@
 
           <input id="customLlmModel" class="sidebar-input"
                 data-os-persist="sidebar.custom.llm.model"
+                list="customLlmModelList"
                 placeholder="模型名称，例如 deepseek-chat / gpt-4o-mini"
                 data-i18n-placeholder="sidebar.custom_llm_model_ph" />
-
-          <input id="customLlmBaseUrl" class="sidebar-input"
-                data-os-persist="sidebar.custom.llm.base_url"
-                placeholder="Base URL，例如 https://api.xxx.com/v1"
-                data-i18n-placeholder="sidebar.custom_llm_baseurl_ph" />
-
-          <input id="customLlmApiKey" class="sidebar-input" type="password"
-                data-os-persist="sidebar.custom.llm.api_key"
-                placeholder="API Key"
-                data-i18n-placeholder="sidebar.custom_llm_apikey_ph" autocomplete="off" />
+          <datalist id="customLlmModelList"></datalist>
 
           <div class="sidebar-hint" data-i18n="sidebar.custom_hint">
-            提示：API Key 仅用于本会话的服务端调用；页面与 Tool trace 会自动脱敏，不会显示明文。
+            提示：API Key 与 Base URL 现在统一从 config.toml 的 model_providers 读取；前端只需要选择 provider 并填写 model。
           </div>
         </div>
       </div>
@@ -137,21 +189,13 @@
 
           <input id="customVlmModel" class="sidebar-input"
                 data-os-persist="sidebar.custom.vlm.model"
+                list="customVlmModelList"
                 placeholder="模型名称，例如 qwen-vl-plus / gpt-4o"
                 data-i18n-placeholder="sidebar.custom_vlm_model_ph" />
-
-          <input id="customVlmBaseUrl" class="sidebar-input"
-                data-os-persist="sidebar.custom.vlm.base_url"
-                placeholder="Base URL，例如 https://api.xxx.com/v1"
-                data-i18n-placeholder="sidebar.custom_vlm_baseurl_ph" />
-
-          <input id="customVlmApiKey" class="sidebar-input" type="password"
-                data-os-persist="sidebar.custom.vlm.api_key"
-                placeholder="API Key"
-                data-i18n-placeholder="sidebar.custom_vlm_apikey_ph" autocomplete="off" />
+          <datalist id="customVlmModelList"></datalist>
 
           <div class="sidebar-hint" data-i18n="sidebar.custom_hint">
-            提示：API Key 仅用于本会话的服务端调用；页面与 Tool trace 会自动脱敏，不会显示明文。
+            提示：API Key 与 Base URL 现在统一从 config.toml 的 model_providers 读取；前端只需要选择 provider 并填写 model。
           </div>
         </div>
       </div>
@@ -216,6 +260,42 @@
           <div class="sidebar-hint" data-i18n="sidebar.pexels_hint">
             提示：默认配置会优先使用 config.toml 的 search_media.pexels_api_key；为空时工具内部会从环境变量读取。
           </div>
+        </div>
+
+        <!-- BGM 配置 -->
+        <div id="bgmBox" class="sidebar-panel"
+            aria-label="背景音乐服务配置"
+            data-i18n-aria-label="sidebar.bgm_box_aria">
+          <div class="sidebar-panel-title">
+            <span class="sidebar-panel-title-text" data-i18n="sidebar.bgm_title">BGM 配置</span>
+
+            <a class="sidebar-help"
+              href="https://github.com/FireRedTeam/FireRed-OpenStoryline/blob/main/docs/source/en/api-key.md"
+              target="_blank" rel="noopener noreferrer"
+              data-help-zh="https://github.com/FireRedTeam/FireRed-OpenStoryline/blob/main/docs/source/zh/api-key.md"
+              data-help-en="https://github.com/FireRedTeam/FireRed-OpenStoryline/blob/main/docs/source/en/api-key.md"
+              data-i18n-aria-label="sidebar.help_aria">
+              <span class="sidebar-help-icon" aria-hidden="true">?</span>
+              <span class="sidebar-help-tooltip" role="tooltip">
+                <span class="sidebar-help-tooltip-body" data-i18n="sidebar.help.bgm"></span>
+                <span class="sidebar-help-tooltip-cta" data-i18n="sidebar.help.cta">点击查看配置教程</span>
+              </span>
+            </a>
+          </div>
+
+          <select id="bgmProviderSelect"
+                  class="sidebar-model-select"
+                  aria-label="选择背景音乐服务"
+                  data-i18n-aria-label="sidebar.bgm_provider_select_aria"
+                  data-os-persist="sidebar.bgm.provider">
+            <option value="" data-i18n="sidebar.bgm_default">使用默认素材库</option>
+          </select>
+
+          <div class="sidebar-hint" data-i18n="sidebar.bgm_hint">
+            提示：默认会从本地 BGM 素材库中挑选；切换到 LocalAI 后会生成新的背景音乐。
+          </div>
+
+          <div id="bgmProviderFields"></div>
         </div>
 
         <!-- TTS 配置 -->      
@@ -481,7 +561,7 @@
       };
     </script>
 
-    <script type="module" src="/static/app.js"></script>
+    <script type="module" src="/static/app.js?v=20260423-runtime-health-1"></script>
   </div>
 
   <!-- 右侧开发者侧边栏（仅 developer_mode=true 时由 JS 显示） -->

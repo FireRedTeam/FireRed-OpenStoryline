@@ -3,9 +3,17 @@ const $ = (sel) => document.querySelector(sel);
 const SIDEBAR_COLLAPSED_KEY = "openstoryline_sidebar_collapsed";
 const DEVBAR_COLLAPSED_KEY = "openstoryline_devbar_collapsed";
 const AUDIO_PREVIEW_MAX = 3;
-const CUSTOM_MODEL_KEY = "__custom__";
+const MODEL_PROVIDER_KEY_PREFIX = "__provider__:";
 const SESSION_ID_KEY = "openstoryline_session_id";
 const SESSION_LIST_KEY = "openstoryline_session_list_v1";
+const __OS_SENSITIVE_PERSIST_PATHS = [
+  "sidebar.custom.llm.provider_preset",
+  "sidebar.custom.llm.base_url",
+  "sidebar.custom.llm.api_key",
+  "sidebar.custom.vlm.provider_preset",
+  "sidebar.custom.vlm.base_url",
+  "sidebar.custom.vlm.api_key",
+];
 
 // =========================================================
 // i18n (zh/en) + lang persistence
@@ -46,19 +54,74 @@ const __OS_I18N = {
     "sidebar.history_title": "对话历史",
     "sidebar.history_empty": "暂无历史会话",
     "sidebar.history_aria": "历史会话列表",
+    "sidebar.codex_title": "Codex Auth",
+    "sidebar.codex_status_loading": "正在读取 Codex 登录状态…",
+    "sidebar.codex_status_signed_out": "尚未登入 ChatGPT。登入後可讓 LLM 與 VLM 都改用 Codex。",
+    "sidebar.codex_status_signed_in": "已登入：{email}（{plan}）",
+    "sidebar.codex_login_device": "使用裝置碼登入",
+    "sidebar.codex_login_browser": "用 ChatGPT 登入",
+    "sidebar.codex_refresh": "刷新狀態",
+    "sidebar.codex_logout": "登出",
+    "sidebar.codex_hint": "使用官方 Codex auth 後，可把 ChatGPT 方案內的模型直接當成 LLM/VLM 使用。",
+    "sidebar.codex_model_label": "Codex 模型",
+    "sidebar.codex_model_select_aria": "选择 Codex 模型",
+    "sidebar.codex_model_loading": "正在读取模型…",
+    "sidebar.codex_model_required": "请先选择 Codex 模型。",
+    "sidebar.codex_reasoning_label": "Reasoning 程度",
+    "sidebar.codex_reasoning_select_aria": "选择 reasoning 程度",
+    "sidebar.codex_reasoning_loading": "正在读取推理档位…",
+    "sidebar.codex_reasoning_none": "无",
+    "sidebar.codex_reasoning_minimal": "极低",
+    "sidebar.codex_reasoning_low": "低",
+    "sidebar.codex_reasoning_medium": "中",
+    "sidebar.codex_reasoning_high": "高",
+    "sidebar.codex_reasoning_xhigh": "超高",
+    "sidebar.codex_login_device_pending": "請開啟 {url}，輸入代碼：{code}",
+    "sidebar.codex_login_browser_pending": "已開啟登入頁；若沒有跳出，請手動打開：{url}",
+    "sidebar.codex_rate_primary": "主額度：{used}% 已用",
+    "sidebar.codex_rate_secondary": "次額度：{used}% 已用",
+    "sidebar.codex_auth_required": "請先完成 Codex / ChatGPT 登入，再使用 Codex provider。",
+    "sidebar.runtime_box_aria": "运行状态配置",
+    "sidebar.runtime_title": "运行状态",
+    "sidebar.runtime_profile_label": "当前开发 profile",
+    "sidebar.runtime_profile_codex_localai": "Codex + LocalAI",
+    "sidebar.runtime_profile_custom": "自定义组合",
+    "sidebar.runtime_refresh": "刷新运行状态",
+    "sidebar.runtime_loading": "正在读取运行状态…",
+    "sidebar.runtime_item_llm": "LLM",
+    "sidebar.runtime_item_vlm": "VLM",
+    "sidebar.runtime_item_tts": "TTS",
+    "sidebar.runtime_item_bgm": "BGM",
+    "sidebar.runtime_item_codex_model": "Codex 模型",
+    "sidebar.runtime_item_reasoning": "Reasoning",
+    "sidebar.runtime_service_firered": "FireRed Web",
+    "sidebar.runtime_service_local_mcp": "本地 MCP",
+    "sidebar.runtime_service_localai_gateway": "LocalAI 网关",
+    "sidebar.runtime_service_localai_tts": "LocalAI TTS",
+    "sidebar.runtime_service_localai_music": "LocalAI 背景音乐",
+    "sidebar.runtime_service_comfyui": "ComfyUI Bridge",
+    "sidebar.runtime_service_codex": "Codex Auth",
+    "sidebar.runtime_status_ready": "正常",
+    "sidebar.runtime_status_signed_in": "已登入",
+    "sidebar.runtime_status_signed_out": "未登入",
+    "sidebar.runtime_status_configured": "已配置",
+    "sidebar.runtime_status_missing": "未配置",
+    "sidebar.runtime_status_unreachable": "不可达",
+    "sidebar.runtime_status_auth_error": "鉴权失败",
+    "sidebar.runtime_status_missing_endpoint": "能力缺失",
+    "sidebar.runtime_status_unavailable": "不可用",
+    "sidebar.runtime_status_unknown": "未知",
     "sidebar.model_label": "对话模型",
     "sidebar.model_select_aria": "选择对话模型",
     "sidebar.custom_model_box_aria": "自定义模型配置",
     "sidebar.custom_model_title": "自定义模型",
     "sidebar.custom_llm_subtitle": "LLM（对话/文案）",
     "sidebar.custom_llm_model_ph": "模型名称，例如 deepseek-chat / gpt-4o-mini",
-    "sidebar.custom_llm_baseurl_ph": "Base URL，例如 https://api.xxx.com/v1",
-    "sidebar.custom_llm_apikey_ph": "API Key",
+    "sidebar.model_provider_select_aria": "选择模型服务提供方",
+    "sidebar.model_provider_hint": "切换 provider 后会自动带入默认模型；API Key 与 Base URL 统一从 config.toml 的 model_providers 读取。",
     "sidebar.custom_vlm_subtitle": "VLM（素材理解）",
     "sidebar.custom_vlm_model_ph": "模型名称，例如 qwen-vl-plus / gpt-4o",
-    "sidebar.custom_vlm_baseurl_ph": "Base URL，例如 https://api.xxx.com/v1",
-    "sidebar.custom_vlm_apikey_ph": "API Key",
-    "sidebar.custom_hint": "提示：API Key 仅用于本会话的服务端调用；页面与 Tool trace 会自动脱敏，不会显示明文。",
+    "sidebar.custom_hint": "提示：API Key 与 Base URL 现在统一从 config.toml 的 model_providers 读取；前端只需要选择 provider 并填写 model。",
     "sidebar.tts_box_aria": "TTS 服务配置",
     "sidebar.tts_title": "TTS 配置",
     "sidebar.tts_provider_select_aria": "选择 TTS 服务厂家",
@@ -90,11 +153,17 @@ const __OS_I18N = {
     "sidebar.pexels_custom": "使用自定义 key",
     "sidebar.pexels_apikey_ph": "Pexels API Key",
     "sidebar.pexels_hint": "提示：默认配置会优先使用 config.toml 的 search_media.pexels_api_key；为空时工具内部会从环境变量读取。",
+    "sidebar.bgm_box_aria": "背景音乐服务配置",
+    "sidebar.bgm_title": "BGM 配置",
+    "sidebar.bgm_provider_select_aria": "选择背景音乐服务",
+    "sidebar.bgm_default": "使用默认素材库",
+    "sidebar.bgm_hint": "提示：默认会从本地 BGM 素材库中挑选；切换到 LocalAI 后会生成新的背景音乐。",
 
     "sidebar.help.cta": "点击查看配置教程",
     "sidebar.help.llm": "LLM 主要用于对话，在工具内部也被用来生成文案/分组/选择BGM等。",
     "sidebar.help.vlm": "VLM 用于素材理解（图像/视频理解）。自定义时请确认模型支持多模态输入。",
     "sidebar.help.pexels": "Pexels 用于搜索网络素材。免责声明：OpenStoryline 搜索的网络素材均来自Pexels，通过Pexels下载的素材仅用于体验Open-Storyline剪辑效果，不允许再分发或出售。我们只提供工具，所有通过本工具下载和使用的素材（如 Pexels 图像）都由用户自行通过 API 获取，我们不对用户生成的视频内容、素材的合法性或因使用本工具导致的任何版权/肖像权纠纷承担责任。使用时请遵循 Pexels 的许可协议。",
+    "sidebar.help.bgm": "用于从本地素材库选择 BGM，或通过 LocalAI 生成背景音乐。",
     "sidebar.help.tts": "用于从文案生成配音。",
     "sidebar.help.ai_transition": "用于为片段之间生成 AI 转场。",
     "sidebar.help.pexels_home_link": "点击进入 Pexels 官方网站",
@@ -170,19 +239,74 @@ const __OS_I18N = {
     "sidebar.history_title": "History",
     "sidebar.history_empty": "No past chats yet",
     "sidebar.history_aria": "Chat history list",
+    "sidebar.codex_title": "Codex Auth",
+    "sidebar.codex_status_loading": "Loading Codex sign-in state…",
+    "sidebar.codex_status_signed_out": "Not signed in to ChatGPT yet. Sign in to use Codex for both LLM and VLM.",
+    "sidebar.codex_status_signed_in": "Signed in: {email} ({plan})",
+    "sidebar.codex_login_device": "Device code login",
+    "sidebar.codex_login_browser": "Sign in with ChatGPT",
+    "sidebar.codex_refresh": "Refresh status",
+    "sidebar.codex_logout": "Log out",
+    "sidebar.codex_hint": "After official Codex auth, ChatGPT-plan models can be used directly as both LLM and VLM.",
+    "sidebar.codex_model_label": "Codex model",
+    "sidebar.codex_model_select_aria": "Select a Codex model",
+    "sidebar.codex_model_loading": "Loading models…",
+    "sidebar.codex_model_required": "Please choose a Codex model first.",
+    "sidebar.codex_reasoning_label": "Reasoning effort",
+    "sidebar.codex_reasoning_select_aria": "Select a reasoning effort",
+    "sidebar.codex_reasoning_loading": "Loading reasoning options…",
+    "sidebar.codex_reasoning_none": "None",
+    "sidebar.codex_reasoning_minimal": "Minimal",
+    "sidebar.codex_reasoning_low": "Low",
+    "sidebar.codex_reasoning_medium": "Medium",
+    "sidebar.codex_reasoning_high": "High",
+    "sidebar.codex_reasoning_xhigh": "Very high",
+    "sidebar.codex_login_device_pending": "Open {url} and enter code: {code}",
+    "sidebar.codex_login_browser_pending": "A login page was opened. If it did not appear, open it manually: {url}",
+    "sidebar.codex_rate_primary": "Primary limit: {used}% used",
+    "sidebar.codex_rate_secondary": "Secondary limit: {used}% used",
+    "sidebar.codex_auth_required": "Please complete Codex / ChatGPT sign-in before using the Codex provider.",
+    "sidebar.runtime_box_aria": "Runtime status settings",
+    "sidebar.runtime_title": "Runtime status",
+    "sidebar.runtime_profile_label": "Current development profile",
+    "sidebar.runtime_profile_codex_localai": "Codex + LocalAI",
+    "sidebar.runtime_profile_custom": "Custom mix",
+    "sidebar.runtime_refresh": "Refresh runtime status",
+    "sidebar.runtime_loading": "Loading runtime status…",
+    "sidebar.runtime_item_llm": "LLM",
+    "sidebar.runtime_item_vlm": "VLM",
+    "sidebar.runtime_item_tts": "TTS",
+    "sidebar.runtime_item_bgm": "BGM",
+    "sidebar.runtime_item_codex_model": "Codex model",
+    "sidebar.runtime_item_reasoning": "Reasoning",
+    "sidebar.runtime_service_firered": "FireRed Web",
+    "sidebar.runtime_service_local_mcp": "Local MCP",
+    "sidebar.runtime_service_localai_gateway": "LocalAI gateway",
+    "sidebar.runtime_service_localai_tts": "LocalAI TTS",
+    "sidebar.runtime_service_localai_music": "LocalAI music",
+    "sidebar.runtime_service_comfyui": "ComfyUI bridge",
+    "sidebar.runtime_service_codex": "Codex auth",
+    "sidebar.runtime_status_ready": "Ready",
+    "sidebar.runtime_status_signed_in": "Signed in",
+    "sidebar.runtime_status_signed_out": "Signed out",
+    "sidebar.runtime_status_configured": "Configured",
+    "sidebar.runtime_status_missing": "Missing",
+    "sidebar.runtime_status_unreachable": "Unreachable",
+    "sidebar.runtime_status_auth_error": "Auth error",
+    "sidebar.runtime_status_missing_endpoint": "Capability missing",
+    "sidebar.runtime_status_unavailable": "Unavailable",
+    "sidebar.runtime_status_unknown": "Unknown",
     "sidebar.model_label": "Chat model",
     "sidebar.model_select_aria": "Select chat model",
     "sidebar.custom_model_box_aria": "Custom model settings",
     "sidebar.custom_model_title": "Custom model",
     "sidebar.custom_llm_subtitle": "LLM (chat/copywriting)",
     "sidebar.custom_llm_model_ph": "Model name, e.g. deepseek-chat / gpt-4o-mini",
-    "sidebar.custom_llm_baseurl_ph": "Base URL, e.g. https://api.xxx.com/v1",
-    "sidebar.custom_llm_apikey_ph": "API key",
+    "sidebar.model_provider_select_aria": "Select a model provider",
+    "sidebar.model_provider_hint": "Switching providers auto-fills the default model. API keys and Base URLs now come from config.toml model_providers.",
     "sidebar.custom_vlm_subtitle": "VLM (media understanding)",
     "sidebar.custom_vlm_model_ph": "Model name, e.g. qwen-vl-plus / gpt-4o",
-    "sidebar.custom_vlm_baseurl_ph": "Base URL, e.g. https://api.xxx.com/v1",
-    "sidebar.custom_vlm_apikey_ph": "API key",
-    "sidebar.custom_hint": "Note: API keys are used only for server-side calls in this session. They are masked in the UI and tool trace.",
+    "sidebar.custom_hint": "Note: API keys and Base URLs are now read from config.toml model_providers. The UI only needs provider and model.",
     "sidebar.tts_box_aria": "TTS configuration",
     "sidebar.tts_title": "TTS",
     "sidebar.tts_provider_select_aria": "Select a TTS provider",
@@ -214,11 +338,17 @@ const __OS_I18N = {
     "sidebar.pexels_custom": "Use custom key",
     "sidebar.pexels_apikey_ph": "Pexels API key",
     "sidebar.pexels_hint": "Note: default mode prefers config.toml (search_media.pexel_api_key). If empty, the tool will fall back to environment variables.",
+    "sidebar.bgm_box_aria": "Background music service configuration",
+    "sidebar.bgm_title": "BGM",
+    "sidebar.bgm_provider_select_aria": "Select a background music provider",
+    "sidebar.bgm_default": "Use default library",
+    "sidebar.bgm_hint": "Note: the default path selects from the bundled BGM library; switching to LocalAI generates a fresh track.",
 
     "sidebar.help.cta": "Click to view the configuration guide",
     "sidebar.help.llm": "LLM is used for chat/copywriting.",
     "sidebar.help.vlm": "VLM is used for media understanding (image/video).",
     "sidebar.help.pexels": "Pexels is used for media search. Disclaimer: The online content searched by OpenStoryline is all from Pexels. Footage downloaded via Pexels is for the sole purpose of experiencing Open-Storyline editing effects and may not be redistributed or sold. We only provide the tool. All materials downloaded and used through this tool (such as Pexels images) are obtained by the user through the API. We are not responsible for the legality of user-generated video content or materials, or for any copyright/portrait rights disputes arising from the use of this tool. Please comply with the Pexels license agreement when using it.",
+    "sidebar.help.bgm": "BGM can be selected from the local music library or generated with LocalAI.",
     "sidebar.help.tts": "TTS is used to generate voiceover from text.",
     "sidebar.help.ai_transition": "Used to generate AI transitions between clips.",
     "sidebar.help.pexels_home_link": "Visit the official Pexels website",
@@ -531,6 +661,52 @@ class ApiClient {
     const r = await fetch(`/api/meta/${encodeURIComponent(kind)}`, { method: "GET" });
     if (!r.ok) throw new Error(await this._readFetchError(r));
     return await r.json(); // { default_provider, providers:[...] }
+  }
+
+  async getModelProviderSchema() {
+    const r = await fetch("/api/meta/model_providers", { method: "GET" });
+    if (!r.ok) throw new Error(await this._readFetchError(r));
+    return await r.json();
+  }
+
+  async getCodexAccount() {
+    const r = await fetch("/api/codex/account", { method: "GET" });
+    if (!r.ok) throw new Error(await this._readFetchError(r));
+    return await r.json();
+  }
+
+  async getCodexRateLimits() {
+    const r = await fetch("/api/codex/rate_limits", { method: "GET" });
+    if (!r.ok) throw new Error(await this._readFetchError(r));
+    return await r.json();
+  }
+
+  async getCodexModels() {
+    const r = await fetch("/api/codex/models", { method: "GET" });
+    if (!r.ok) throw new Error(await this._readFetchError(r));
+    return await r.json();
+  }
+
+  async getRuntimeHealth() {
+    const r = await fetch("/api/meta/runtime_health", { method: "GET" });
+    if (!r.ok) throw new Error(await this._readFetchError(r));
+    return await r.json();
+  }
+
+  async startCodexLogin(flow) {
+    const r = await fetch("/api/codex/login/start", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ flow }),
+    });
+    if (!r.ok) throw new Error(await this._readFetchError(r));
+    return await r.json();
+  }
+
+  async logoutCodex() {
+    const r = await fetch("/api/codex/logout", { method: "POST" });
+    if (!r.ok) throw new Error(await this._readFetchError(r));
+    return await r.json();
   }
 
   async cancelTurn(sessionId) {
@@ -2396,13 +2572,39 @@ class App {
 
     // Custom model UI
     this.customLlmModel = $("#customLlmModel");
-    this.customLlmBaseUrl = $("#customLlmBaseUrl");
-    this.customLlmApiKey = $("#customLlmApiKey");
     this.customVlmModel = $("#customVlmModel");
-    this.customVlmBaseUrl = $("#customVlmBaseUrl");
-    this.customVlmApiKey = $("#customVlmApiKey");
+    this.customLlmModelList = $("#customLlmModelList");
+    this.customVlmModelList = $("#customVlmModelList");
+    this.modelProviderSchemas = {
+      llm: null,
+      vlm: null,
+    };
+    this.codexAuthBox = $("#codexAuthBox");
+    this.codexAuthStatus = $("#codexAuthStatus");
+    this.codexRateLimitsEl = $("#codexRateLimits");
+    this.codexLoginResultEl = $("#codexLoginResult");
+    this.codexLoginDeviceBtn = $("#codexLoginDeviceBtn");
+    this.codexLoginBrowserBtn = $("#codexLoginBrowserBtn");
+    this.codexRefreshBtn = $("#codexRefreshBtn");
+    this.codexLogoutBtn = $("#codexLogoutBtn");
+    this.codexModelSelect = $("#codexModelSelect");
+    this.codexReasoningSelect = $("#codexReasoningSelect");
+    this.codexAccount = null;
+    this.codexRateLimits = null;
+    this.codexModels = [];
+    this.codexLoginState = null;
+    this.runtimeStatusBox = $("#runtimeStatusBox");
+    this.runtimeProfileBadge = $("#runtimeProfileBadge");
+    this.runtimeProfileDetails = $("#runtimeProfileDetails");
+    this.runtimeHealthList = $("#runtimeHealthList");
+    this.runtimeHealthWarnings = $("#runtimeHealthWarnings");
+    this.runtimeHealthRefreshBtn = $("#runtimeHealthRefreshBtn");
+    this.runtimeHealth = null;
 
     // Provider config UI
+    this.bgmBox = $("#bgmBox");
+    this.bgmProviderSelect = $("#bgmProviderSelect");
+    this.bgmProviderFieldsHost = $("#bgmProviderFields");
     this.ttsBox = $("#ttsBox");
     this.ttsProviderSelect = $("#ttsProviderSelect");
     this.ttsProviderFieldsHost = $("#ttsProviderFields");
@@ -2410,10 +2612,19 @@ class App {
     this.aiTransitionProviderSelect = $("#aiTransitionProviderSelect");
     this.aiTransitionProviderFieldsHost = $("#aiTransitionProviderFields");
     this.providerUiSchemas = {
+      bgm: null,
       tts: null,
       ai_transition: null,
     };
     this.providerPanels = {
+      bgm: {
+        box: this.bgmBox,
+        select: this.bgmProviderSelect,
+        host: this.bgmProviderFieldsHost,
+        persistPrefix: "sidebar.bgm",
+        defaultTextKey: "sidebar.bgm_default",
+        showDefaultOption: true,
+      },
       tts: {
         box: this.ttsBox,
         select: this.ttsProviderSelect,
@@ -2568,8 +2779,12 @@ class App {
     this.ui.bindModalClose();
     this.bindUI();
     this._setLang(this.lang, { persist: false, syncServer: false });
+    await this.loadModelProviderUiSchema();
+    await this.refreshCodexState({ autoSelect: true });
+    await this.loadProviderUiSchema("bgm");
     await this.loadProviderUiSchema("tts");
     await this.loadProviderUiSchema("ai_transition");
+    await this.refreshRuntimeHealth();
 
     // 先加载本地会话列表
     this.sessionHistory = this._loadSessionHistory();
@@ -3079,6 +3294,638 @@ class App {
     return this.providerPanels?.[kind] || null;
   }
 
+  _getCustomModelInputs(kind) {
+    if (kind === "llm") {
+      return {
+        modelInput: this.customLlmModel,
+        modelList: this.customLlmModelList,
+      };
+    }
+    if (kind === "vlm") {
+      return {
+        modelInput: this.customVlmModel,
+        modelList: this.customVlmModelList,
+      };
+    }
+    return {
+      modelInput: null,
+      modelList: null,
+    };
+  }
+
+  _codexSignedIn() {
+    return !!(this.codexAccount && this.codexAccount.signed_in);
+  }
+
+  _codexModelNames() {
+    if (!Array.isArray(this.codexModels) || !this.codexModels.length) {
+      const preset = this._findModelProviderPreset("llm", "codex") || this._findModelProviderPreset("vlm", "codex");
+      if (!Array.isArray(preset?.models)) return [];
+      return preset.models
+        .map((item) => (typeof item === "string" ? item : String(item?.model || item?.id || "").trim()))
+        .filter(Boolean);
+    }
+    const out = [];
+    const seen = new Set();
+    for (const item of this.codexModels) {
+      const model = String(item?.model || item?.id || "").trim();
+      if (!model || seen.has(model)) continue;
+      seen.add(model);
+      out.push(model);
+    }
+    return out;
+  }
+
+  _codexModelMeta(modelName) {
+    const wanted = String(modelName || "").trim();
+    if (!wanted || !Array.isArray(this.codexModels)) return null;
+    return this.codexModels.find((item) => String(item?.model || item?.id || "").trim() === wanted) || null;
+  }
+
+  _codexPersistedValue(path) {
+    try {
+      return String(__osGetByPath(__osLoadConfig(), path) || "").trim();
+    } catch {
+      return "";
+    }
+  }
+
+  _codexDefaultModel() {
+    const models = Array.isArray(this.codexModels) ? this.codexModels : [];
+    const markedDefault = models.find((item) => !!item?.is_default);
+    const markedName = String(markedDefault?.model || markedDefault?.id || "").trim();
+    if (markedName) return markedName;
+
+    const preset = this._findModelProviderPreset("llm", "codex") || this._findModelProviderPreset("vlm", "codex");
+    const presetModel = String(preset?.model || "").trim();
+    if (presetModel) return presetModel;
+
+    const names = this._codexModelNames();
+    return names[0] || "";
+  }
+
+  _codexReasoningOptionsForModel(modelName) {
+    const meta = this._codexModelMeta(modelName);
+    const metaOptions = Array.isArray(meta?.reasoning_effort_options) ? meta.reasoning_effort_options : [];
+    const preset = this._findModelProviderPreset("llm", "codex") || this._findModelProviderPreset("vlm", "codex");
+    const presetOptions = Array.isArray(preset?.reasoning_effort_options) ? preset.reasoning_effort_options : [];
+    const fallback = ["none", "minimal", "low", "medium", "high", "xhigh"];
+    const candidates = metaOptions.length ? metaOptions : (presetOptions.length ? presetOptions : fallback);
+
+    const out = [];
+    const seen = new Set();
+    for (const item of candidates) {
+      const value = String(item || "").trim().toLowerCase();
+      if (!value || seen.has(value)) continue;
+      seen.add(value);
+      out.push(value);
+    }
+    return out;
+  }
+
+  _codexDefaultReasoningEffort(modelName) {
+    const meta = this._codexModelMeta(modelName);
+    const metaDefault = String(meta?.default_reasoning_effort || "").trim().toLowerCase();
+    if (metaDefault) return metaDefault;
+
+    const preset = this._findModelProviderPreset("llm", "codex") || this._findModelProviderPreset("vlm", "codex");
+    const presetDefault = String(preset?.default_reasoning_effort || "").trim().toLowerCase();
+    return presetDefault || "medium";
+  }
+
+  _codexReasoningLabel(value) {
+    const text = String(value || "").trim().toLowerCase();
+    if (!text) return "";
+    const translated = __t(`sidebar.codex_reasoning_${text}`);
+    return translated === `sidebar.codex_reasoning_${text}` ? text : translated;
+  }
+
+  _selectedCodexModel() {
+    const value = String(this.codexModelSelect?.value || "").trim();
+    if (value) return value;
+    return this._codexDefaultModel();
+  }
+
+  _selectedCodexReasoning() {
+    const value = String(this.codexReasoningSelect?.value || "").trim().toLowerCase();
+    if (value) return value;
+    return this._codexDefaultReasoningEffort(this._selectedCodexModel());
+  }
+
+  _renderCodexControls() {
+    if (this.codexModelSelect) {
+      const models = (Array.isArray(this.codexModels) && this.codexModels.length)
+        ? this.codexModels
+        : this._codexModelNames().map((model) => ({
+            id: model,
+            model,
+            display_name: model,
+          }));
+      const modelNames = this._codexModelNames();
+      const current = String(this.codexModelSelect.value || "").trim();
+      const persisted = this._codexPersistedValue("sidebar.codex.model");
+      const desired = [current, persisted, this._codexDefaultModel()].find((item) => modelNames.includes(item)) || "";
+
+      this.codexModelSelect.innerHTML = "";
+      if (models.length) {
+        models.forEach((item) => {
+          const model = String(item?.model || item?.id || "").trim();
+          if (!model) return;
+          const opt = document.createElement("option");
+          opt.value = model;
+          opt.textContent = String(item?.display_name || model);
+          this.codexModelSelect.appendChild(opt);
+        });
+        this.codexModelSelect.disabled = false;
+        if (desired) this.codexModelSelect.value = desired;
+      } else {
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.textContent = __t("sidebar.codex_model_loading");
+        this.codexModelSelect.appendChild(opt);
+        this.codexModelSelect.disabled = true;
+      }
+    }
+
+    if (this.codexReasoningSelect) {
+      const model = this._selectedCodexModel();
+      const options = this._codexReasoningOptionsForModel(model);
+      const current = String(this.codexReasoningSelect.value || "").trim().toLowerCase();
+      const persisted = this._codexPersistedValue("sidebar.codex.reasoning_effort");
+      const desired = [current, persisted, this._codexDefaultReasoningEffort(model)].find((item) => options.includes(String(item || "").trim().toLowerCase())) || "";
+
+      this.codexReasoningSelect.innerHTML = "";
+      if (options.length) {
+        options.forEach((item) => {
+          const value = String(item || "").trim().toLowerCase();
+          if (!value) return;
+          const opt = document.createElement("option");
+          opt.value = value;
+          opt.textContent = this._codexReasoningLabel(value);
+          this.codexReasoningSelect.appendChild(opt);
+        });
+        this.codexReasoningSelect.disabled = false;
+        if (desired) this.codexReasoningSelect.value = desired;
+      } else {
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.textContent = __t("sidebar.codex_reasoning_loading");
+        this.codexReasoningSelect.appendChild(opt);
+        this.codexReasoningSelect.disabled = true;
+      }
+    }
+  }
+
+  _updateCodexPresetModelsInSchema() {
+    const models = this._codexModelNames();
+    for (const kind of ["llm", "vlm"]) {
+      const providers = this.modelProviderSchemas?.[kind]?.providers;
+      if (!Array.isArray(providers)) continue;
+      const preset = providers.find((item) => String(item?.provider || "").trim() === "codex");
+      if (!preset) continue;
+      if (models.length) preset.models = models.slice();
+      const fallback = this._codexDefaultModel() || String(preset.model || "").trim();
+      if (fallback) preset.model = fallback;
+    }
+  }
+
+  _providerModelCandidates(kind, providerName) {
+    const preset = this._findModelProviderPreset(kind, providerName);
+    if (!preset) return [];
+    if (providerName === "codex") {
+      const models = this._codexModelNames();
+      if (models.length) return models;
+    }
+    if (!Array.isArray(preset.models)) return [];
+    return preset.models
+      .map((item) => (typeof item === "string" ? item : String(item?.model || item?.id || "").trim()))
+      .filter(Boolean);
+  }
+
+  _populateProviderModelList(kind, providerName) {
+    const { modelList } = this._getCustomModelInputs(kind);
+    if (!modelList) return;
+    modelList.innerHTML = "";
+    const seen = new Set();
+    for (const model of this._providerModelCandidates(kind, providerName)) {
+      const text = String(model || "").trim();
+      if (!text || seen.has(text)) continue;
+      seen.add(text);
+      const opt = document.createElement("option");
+      opt.value = text;
+      modelList.appendChild(opt);
+    }
+  }
+
+  _preferredSelectableModel(items) {
+    const list = Array.isArray(items) ? items.slice() : [];
+    if (!list.length) return "";
+    const codexKey = this._providerPresetModelKey("codex");
+    if (this._codexSignedIn() && list.includes(codexKey)) return codexKey;
+    const nonCodex = list.find((item) => this._providerNameFromModelSelection(item) !== "codex");
+    return nonCodex || list[0];
+  }
+
+  _switchBothToCodex() {
+    const codexKey = this._providerPresetModelKey("codex");
+    if (!codexKey) return;
+
+    if (this.llmSelect && Array.from(this.llmSelect.options || []).some((opt) => opt.value === codexKey)) {
+      this.llmModel = codexKey;
+      this.llmSelect.value = codexKey;
+      this._applyModelProviderPreset("llm", "codex", { force: true });
+    }
+    if (this.vlmSelect && Array.from(this.vlmSelect.options || []).some((opt) => opt.value === codexKey)) {
+      this.vlmModel = codexKey;
+      this.vlmSelect.value = codexKey;
+      this._applyModelProviderPreset("vlm", "codex", { force: true });
+    }
+    this._syncConfigPanels();
+  }
+
+  _renderCodexAuthState(errorText = "") {
+    if (this.codexAuthStatus) {
+      if (errorText) {
+        this.codexAuthStatus.textContent = errorText;
+      } else if (this._codexSignedIn()) {
+        const email = String(this.codexAccount?.account?.email || "ChatGPT").trim();
+        const plan = String(this.codexAccount?.account?.plan_type || "unknown").trim();
+        this.codexAuthStatus.textContent = __t("sidebar.codex_status_signed_in", { email, plan });
+      } else {
+        this.codexAuthStatus.textContent = __t("sidebar.codex_status_signed_out");
+      }
+    }
+
+    if (this.codexRateLimitsEl) {
+      const parts = [];
+      const primary = this.codexRateLimits?.primary;
+      const secondary = this.codexRateLimits?.secondary;
+      if (primary && primary.used_percent != null) {
+        parts.push(__t("sidebar.codex_rate_primary", { used: primary.used_percent }));
+      }
+      if (secondary && secondary.used_percent != null) {
+        parts.push(__t("sidebar.codex_rate_secondary", { used: secondary.used_percent }));
+      }
+      this.codexRateLimitsEl.textContent = parts.join(" · ");
+      this.codexRateLimitsEl.classList.toggle("hidden", !parts.length);
+    }
+
+    if (this.codexLoginResultEl) {
+      let text = "";
+      if (this.codexLoginState?.flow === "device_code") {
+        text = __t("sidebar.codex_login_device_pending", {
+          url: String(this.codexLoginState.verification_url || ""),
+          code: String(this.codexLoginState.user_code || ""),
+        });
+      } else if (this.codexLoginState?.flow === "browser") {
+        text = __t("sidebar.codex_login_browser_pending", {
+          url: String(this.codexLoginState.auth_url || ""),
+        });
+      }
+      this.codexLoginResultEl.textContent = text;
+      this.codexLoginResultEl.classList.toggle("hidden", !text);
+    }
+
+    if (this.codexLogoutBtn) {
+      this.codexLogoutBtn.classList.toggle("hidden", !this._codexSignedIn());
+    }
+  }
+
+  _runtimeProviderLabel(kind, providerName) {
+    const provider = String(providerName || "").trim();
+    if (!provider) return "—";
+    if (kind === "llm" || kind === "vlm") {
+      const preset = this._findModelProviderPreset(kind, provider);
+      return String(preset?.label || provider);
+    }
+    const schema = this.providerUiSchemas?.[kind];
+    const item = Array.isArray(schema?.providers)
+      ? schema.providers.find((entry) => String(entry?.provider || "").trim() === provider)
+      : null;
+    return String(item?.label || provider);
+  }
+
+  _runtimeEffectivePanelProvider(kind) {
+    const panel = this._getProviderPanel(kind);
+    const selected = String(panel?.select?.value || "").trim();
+    if (selected) return selected;
+    return String(this.providerUiSchemas?.[kind]?.default_provider || "").trim();
+  }
+
+  _runtimeProfileName() {
+    const llmProvider = this._providerNameFromModelSelection(this.llmModel);
+    const vlmProvider = this._providerNameFromModelSelection(this.vlmModel);
+    const ttsProvider = this._runtimeEffectivePanelProvider("tts");
+    const bgmProvider = this._runtimeEffectivePanelProvider("bgm");
+    if (llmProvider === "codex" && vlmProvider === "codex" && ttsProvider === "localai" && bgmProvider === "localai") {
+      return __t("sidebar.runtime_profile_codex_localai");
+    }
+    return __t("sidebar.runtime_profile_custom");
+  }
+
+  _runtimeProfileEntries() {
+    const entries = [
+      {
+        label: __t("sidebar.runtime_item_llm"),
+        value: this._labelForModelSelection("llm", this.llmModel) || "—",
+      },
+      {
+        label: __t("sidebar.runtime_item_vlm"),
+        value: this._labelForModelSelection("vlm", this.vlmModel) || "—",
+      },
+      {
+        label: __t("sidebar.runtime_item_tts"),
+        value: this._runtimeProviderLabel("tts", this._runtimeEffectivePanelProvider("tts")),
+      },
+      {
+        label: __t("sidebar.runtime_item_bgm"),
+        value: this._runtimeProviderLabel("bgm", this._runtimeEffectivePanelProvider("bgm")),
+      },
+    ];
+
+    const usesCodex = this._providerNameFromModelSelection(this.llmModel) === "codex"
+      || this._providerNameFromModelSelection(this.vlmModel) === "codex";
+    if (usesCodex) {
+      entries.push({
+        label: __t("sidebar.runtime_item_codex_model"),
+        value: this._selectedCodexModel() || "—",
+      });
+      entries.push({
+        label: __t("sidebar.runtime_item_reasoning"),
+        value: this._codexReasoningLabel(this._selectedCodexReasoning()) || "—",
+      });
+    }
+    return entries;
+  }
+
+  _runtimeStatusText(item) {
+    if (item && typeof item.signed_in === "boolean") {
+      return __t(item.signed_in ? "sidebar.runtime_status_signed_in" : "sidebar.runtime_status_signed_out");
+    }
+    if (item?.ready) return __t("sidebar.runtime_status_ready");
+    const status = String(item?.status || "").trim().toLowerCase();
+    const key = {
+      signed_in: "sidebar.runtime_status_signed_in",
+      signed_out: "sidebar.runtime_status_signed_out",
+      running: "sidebar.runtime_status_ready",
+      ready: "sidebar.runtime_status_ready",
+      configured: "sidebar.runtime_status_configured",
+      missing: "sidebar.runtime_status_missing",
+      unreachable: "sidebar.runtime_status_unreachable",
+      auth_error: "sidebar.runtime_status_auth_error",
+      missing_endpoint: "sidebar.runtime_status_missing_endpoint",
+      unavailable: "sidebar.runtime_status_unavailable",
+    }[status] || "sidebar.runtime_status_unknown";
+    return __t(key);
+  }
+
+  _runtimeHealthEntries() {
+    const health = this.runtimeHealth || {};
+    return [
+      { label: __t("sidebar.runtime_service_firered"), item: health.firered_web },
+      { label: __t("sidebar.runtime_service_local_mcp"), item: health.local_mcp },
+      { label: __t("sidebar.runtime_service_localai_gateway"), item: health.localai_gateway },
+      { label: __t("sidebar.runtime_service_localai_tts"), item: health.localai_tts_ready },
+      { label: __t("sidebar.runtime_service_localai_music"), item: health.localai_music_ready },
+      { label: __t("sidebar.runtime_service_comfyui"), item: health.comfyui_bridge },
+      { label: __t("sidebar.runtime_service_codex"), item: health.codex_auth_state },
+    ];
+  }
+
+  _renderRuntimeStatusPanel(errorText = "") {
+    if (this.runtimeProfileBadge) {
+      this.runtimeProfileBadge.textContent = this._runtimeProfileName();
+    }
+
+    if (this.runtimeProfileDetails) {
+      this.runtimeProfileDetails.innerHTML = "";
+      this._runtimeProfileEntries().forEach((entry) => {
+        const row = document.createElement("div");
+        row.className = "runtime-profile-item";
+        row.innerHTML = `
+          <span class="runtime-profile-label"></span>
+          <span class="runtime-profile-value"></span>
+        `;
+        row.querySelector(".runtime-profile-label").textContent = String(entry.label || "");
+        row.querySelector(".runtime-profile-value").textContent = String(entry.value || "—");
+        this.runtimeProfileDetails.appendChild(row);
+      });
+    }
+
+    if (this.runtimeHealthList) {
+      this.runtimeHealthList.innerHTML = "";
+      if (!this.runtimeHealth && !errorText) {
+        const hint = document.createElement("div");
+        hint.className = "sidebar-hint";
+        hint.textContent = __t("sidebar.runtime_loading");
+        this.runtimeHealthList.appendChild(hint);
+      } else {
+        this._runtimeHealthEntries().forEach(({ label, item }) => {
+          const row = document.createElement("div");
+          row.className = "runtime-health-item";
+          const statusText = this._runtimeStatusText(item);
+          row.innerHTML = `
+            <div class="runtime-health-head">
+              <span class="runtime-health-label"></span>
+              <span class="runtime-health-status"></span>
+            </div>
+            <div class="runtime-health-detail hidden"></div>
+          `;
+          row.querySelector(".runtime-health-label").textContent = label;
+          const statusEl = row.querySelector(".runtime-health-status");
+          statusEl.textContent = statusText;
+          statusEl.classList.toggle("is-ready", !!item?.ready || !!item?.signed_in);
+          statusEl.classList.toggle("is-problem", !(!!item?.ready || !!item?.signed_in));
+          const detail = String(item?.detail || "").trim();
+          const detailEl = row.querySelector(".runtime-health-detail");
+          if (detail) {
+            detailEl.textContent = detail;
+            detailEl.classList.remove("hidden");
+          }
+          this.runtimeHealthList.appendChild(row);
+        });
+      }
+    }
+
+    if (this.runtimeHealthWarnings) {
+      const warnings = Array.isArray(this.runtimeHealth?.warnings) ? this.runtimeHealth.warnings.slice() : [];
+      if (errorText) warnings.unshift(errorText);
+      this.runtimeHealthWarnings.innerHTML = "";
+      this.runtimeHealthWarnings.classList.toggle("hidden", warnings.length === 0);
+      warnings.forEach((text) => {
+        const box = document.createElement("div");
+        box.className = "sidebar-warning";
+        box.innerHTML = `<div class="sidebar-warning-body"></div>`;
+        box.querySelector(".sidebar-warning-body").textContent = String(text || "");
+        this.runtimeHealthWarnings.appendChild(box);
+      });
+    }
+  }
+
+  async refreshRuntimeHealth() {
+    let errorText = "";
+    try {
+      this.runtimeHealth = await this.api.getRuntimeHealth();
+    } catch (err) {
+      console.warn("[runtime_health] failed to load:", err);
+      errorText = String(err?.message || err || "");
+    }
+    this._renderRuntimeStatusPanel(errorText);
+  }
+
+  async refreshCodexState({ autoSelect = false } = {}) {
+    let errorText = "";
+    let account = this.codexAccount;
+    let limits = null;
+    let modelsResp = null;
+
+    try {
+      [account, modelsResp] = await Promise.all([
+        this.api.getCodexAccount(),
+        this.api.getCodexModels(),
+      ]);
+    } catch (err) {
+      errorText = String(err?.message || err || "");
+    }
+
+    if (account?.signed_in) {
+      try {
+        limits = await this.api.getCodexRateLimits();
+      } catch (err) {
+        console.warn("[codex] failed to load rate limits:", err);
+      }
+    }
+
+    this.codexAccount = account || { signed_in: false, account: null };
+    this.codexRateLimits = limits;
+    this.codexModels = Array.isArray(modelsResp?.models) ? modelsResp.models : [];
+    if (this._codexSignedIn()) {
+      this.codexLoginState = null;
+    }
+
+    this._updateCodexPresetModelsInSchema();
+    this._renderCodexControls();
+    this._renderCodexAuthState(errorText);
+    this._populateProviderModelList("llm", this._providerNameFromModelSelection(this.llmModel));
+    this._populateProviderModelList("vlm", this._providerNameFromModelSelection(this.vlmModel));
+
+    if (autoSelect && this._codexSignedIn()) {
+      this._switchBothToCodex();
+    }
+  }
+
+  _maybeOpenCodexLoginUrl(loginResp) {
+    const url = String(loginResp?.auth_url || loginResp?.verification_url || "").trim();
+    if (!url) return;
+    try { window.open(url, "_blank", "noopener,noreferrer"); } catch {}
+  }
+
+  async _pollCodexLoginCompletion() {
+    for (let i = 0; i < 20; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      await this.refreshCodexState({ autoSelect: true });
+      if (this._codexSignedIn()) {
+        await this.refreshRuntimeHealth();
+        return;
+      }
+    }
+  }
+
+  _providerPresetModelKey(providerName) {
+    const provider = String(providerName || "").trim();
+    return provider ? `${MODEL_PROVIDER_KEY_PREFIX}${provider}` : "";
+  }
+
+  _providerNameFromModelSelection(value) {
+    const text = String(value || "").trim();
+    return text.startsWith(MODEL_PROVIDER_KEY_PREFIX) ? text.slice(MODEL_PROVIDER_KEY_PREFIX.length) : "";
+  }
+
+  _isProviderPresetModelSelection(value) {
+    return !!this._providerNameFromModelSelection(value);
+  }
+
+  _isCustomModelSelection(value) {
+    return this._isProviderPresetModelSelection(value);
+  }
+
+  _runtimeModelKeyForSelection(value) {
+    return String(value || "").trim();
+  }
+
+  _getModelProviderPresets(kind) {
+    const schema = this.modelProviderSchemas?.[kind];
+    return (schema && Array.isArray(schema.providers)) ? schema.providers : [];
+  }
+
+  _findModelProviderPreset(kind, providerName) {
+    const provider = String(providerName || "").trim();
+    if (!provider) return null;
+    return this._getModelProviderPresets(kind).find((item) => String(item?.provider || "").trim() === provider) || null;
+  }
+
+  _labelForModelSelection(kind, value) {
+    const text = String(value || "").trim();
+    if (!text) return "";
+
+    const providerName = this._providerNameFromModelSelection(text);
+    if (providerName) {
+      const preset = this._findModelProviderPreset(kind, providerName);
+      return String(preset?.label || providerName);
+    }
+
+    return text;
+  }
+
+  _buildSelectableModelList(kind) {
+    const items = [];
+    const seen = new Set();
+
+    this._getModelProviderPresets(kind).forEach((preset) => {
+      const key = this._providerPresetModelKey(preset?.provider);
+      if (!key || seen.has(key)) return;
+      items.push(key);
+      seen.add(key);
+    });
+
+    return items;
+  }
+
+  _emitPersistableFieldChange(el) {
+    if (!el) return;
+    try { el.dispatchEvent(new Event("input", { bubbles: true })); } catch {}
+    try { el.dispatchEvent(new Event("change", { bubbles: true })); } catch {}
+  }
+
+  async loadModelProviderUiSchema() {
+    let schema = null;
+    try {
+      schema = await this.api.getModelProviderSchema();
+    } catch (e) {
+      console.warn("[model_providers] failed to load /api/meta/model_providers:", e);
+    }
+
+    this.modelProviderSchemas = {
+      llm: schema?.llm || { providers: [] },
+      vlm: schema?.vlm || { providers: [] },
+    };
+    this._renderCodexControls();
+  }
+
+  _applyModelProviderPreset(kind, providerName, { force = false } = {}) {
+    const preset = this._findModelProviderPreset(kind, providerName);
+    if (!preset) return;
+
+    const { modelInput } = this._getCustomModelInputs(kind);
+    this._populateProviderModelList(kind, providerName);
+    if (modelInput) {
+      const current = String(modelInput.value || "").trim();
+      if (!force && current) return;
+      modelInput.value = String(preset.model || "");
+      this._emitPersistableFieldChange(modelInput);
+    }
+  }
+
   async loadProviderUiSchema(kind) {
     const panel = this._getProviderPanel(kind);
     if (!panel) return;
@@ -3099,6 +3946,7 @@ class App {
     if (!panel || !panel.select || !panel.host) return;
 
     const providers = (schema && Array.isArray(schema.providers)) ? schema.providers : [];
+    const defaultProvider = String(schema?.default_provider || "").trim();
     const before = String(panel.select.value || "").trim();
 
     panel.select.innerHTML = "";
@@ -3170,6 +4018,8 @@ class App {
 
     if (before) {
       panel.select.value = before;
+    } else if (defaultProvider && providers.some((item) => String(item?.provider || "").trim() === defaultProvider)) {
+      panel.select.value = defaultProvider;
     } else if (!panel.showDefaultOption && providers.length > 0) {
       const firstProvider = String(providers[0]?.provider || "").trim();
       panel.select.value = firstProvider;
@@ -3292,16 +4142,16 @@ class App {
   }
 
   _rerenderLangDynamicBits() {
-    const apply = (sel) => {
-      if (!sel) return;
-      const opt = sel.querySelector(`option[value="${CUSTOM_MODEL_KEY}"]`);
-      if (opt) opt.textContent = __t("sidebar.use_custom_model");
-    };
+    ["llm", "vlm"].forEach((kind) => {
+      const select = kind === "llm" ? this.llmSelect : this.vlmSelect;
+      if (!select) return;
+      Array.from(select.options || []).forEach((opt) => {
+        if (!opt) return;
+        opt.textContent = this._labelForModelSelection(kind, opt.value);
+      });
+    });
 
-    apply(this.llmSelect);
-    apply(this.vlmSelect);
-
-    ["tts", "ai_transition"].forEach((kind) => {
+    ["bgm", "tts", "ai_transition"].forEach((kind) => {
       const panel = this._getProviderPanel(kind);
       if (!panel?.select || !panel.showDefaultOption) return;
       const opt0 = panel.select.querySelector('option[value=""]');
@@ -3309,6 +4159,9 @@ class App {
     });
 
     __rerenderProviderFieldPlaceholders(document);
+    this._renderCodexControls();
+    this._renderCodexAuthState();
+    this._renderRuntimeStatusPanel();
   }
 
   _pushLangToServer() {
@@ -3331,20 +4184,14 @@ class App {
   }
 
   applySnapshotModels(snapshot) {
-    const llmModels =
-      (snapshot && Array.isArray(snapshot.llm_models)) ? snapshot.llm_models :
-      (snapshot && Array.isArray(snapshot.chat_models)) ? snapshot.chat_models : [];
-
     const llmCurrent =
       (snapshot && typeof snapshot.llm_model_key === "string") ? snapshot.llm_model_key :
       (snapshot && typeof snapshot.chat_model_key === "string") ? snapshot.chat_model_key : "";
 
-    const vlmModels = (snapshot && Array.isArray(snapshot.vlm_models)) ? snapshot.vlm_models : [];
     const vlmCurrent = (snapshot && typeof snapshot.vlm_model_key === "string") ? snapshot.vlm_model_key : "";
 
-    // 确保至少有一个选项
-    const llmList = (llmModels && llmModels.length) ? llmModels.slice() : (llmCurrent ? [llmCurrent] : []);
-    const vlmList = (vlmModels && vlmModels.length) ? vlmModels.slice() : (vlmCurrent ? [vlmCurrent] : []);
+    const llmList = this._buildSelectableModelList("llm");
+    const vlmList = this._buildSelectableModelList("vlm");
 
     this.llmModels = llmList;
     this.vlmModels = vlmList;
@@ -3355,14 +4202,20 @@ class App {
       for (const m of llmList) {
         const opt = document.createElement("option");
         opt.value = m;
-        opt.textContent = (m === CUSTOM_MODEL_KEY) ? __t("sidebar.use_custom_model") : m;
+        opt.textContent = this._labelForModelSelection("llm", m);
         this.llmSelect.appendChild(opt);
       }
       let selected = "";
-      if (llmCurrent && llmList.includes(llmCurrent)) selected = llmCurrent;
-      else if (llmList.length) selected = llmList[0];
+      if (llmCurrent && this._findModelProviderPreset("llm", llmCurrent)) {
+        selected = this._providerPresetModelKey(llmCurrent);
+      } else if (llmCurrent && llmList.includes(llmCurrent)) {
+        selected = llmCurrent;
+      }
+      else if (llmList.length) selected = this._preferredSelectableModel(llmList);
       this.llmModel = selected || null;
       if (this.llmModel) this.llmSelect.value = this.llmModel;
+      const provider = this._providerNameFromModelSelection(this.llmModel);
+      if (provider) this._applyModelProviderPreset("llm", provider);
     }
 
     // render VLM select
@@ -3371,14 +4224,20 @@ class App {
       for (const m of vlmList) {
         const opt = document.createElement("option");
         opt.value = m;
-        opt.textContent = (m === CUSTOM_MODEL_KEY) ? __t("sidebar.use_custom_model") : m;
+        opt.textContent = this._labelForModelSelection("vlm", m);
         this.vlmSelect.appendChild(opt);
       }
       let selected = "";
-      if (vlmCurrent && vlmList.includes(vlmCurrent)) selected = vlmCurrent;
-      else if (vlmList.length) selected = vlmList[0];
+      if (vlmCurrent && this._findModelProviderPreset("vlm", vlmCurrent)) {
+        selected = this._providerPresetModelKey(vlmCurrent);
+      } else if (vlmCurrent && vlmList.includes(vlmCurrent)) {
+        selected = vlmCurrent;
+      }
+      else if (vlmList.length) selected = this._preferredSelectableModel(vlmList);
       this.vlmModel = selected || null;
       if (this.vlmModel) this.vlmSelect.value = this.vlmModel;
+      const provider = this._providerNameFromModelSelection(this.vlmModel);
+      if (provider) this._applyModelProviderPreset("vlm", provider);
     }
 
     this._syncConfigPanels();
@@ -3386,13 +4245,15 @@ class App {
 
 
   _syncConfigPanels() {
-    const llmCustom = (this.llmModel === CUSTOM_MODEL_KEY);
-    const vlmCustom = (this.vlmModel === CUSTOM_MODEL_KEY);
+    const llmCustom = this._isCustomModelSelection(this.llmModel);
+    const vlmCustom = this._isCustomModelSelection(this.vlmModel);
+    const llmProvider = this._providerNameFromModelSelection(this.llmModel);
+    const vlmProvider = this._providerNameFromModelSelection(this.vlmModel);
 
-    if (this.customLlmSection) this.customLlmSection.classList.toggle("hidden", !llmCustom);
-    if (this.customVlmSection) this.customVlmSection.classList.toggle("hidden", !vlmCustom);
+    if (this.customLlmSection) this.customLlmSection.classList.toggle("hidden", !(llmCustom && llmProvider !== "codex"));
+    if (this.customVlmSection) this.customVlmSection.classList.toggle("hidden", !(vlmCustom && vlmProvider !== "codex"));
 
-    ["tts", "ai_transition"].forEach((kind) => {
+    ["bgm", "tts", "ai_transition"].forEach((kind) => {
       const panel = this._getProviderPanel(kind);
       if (!panel?.host) return;
       const provider = panel.select ? String(panel.select.value || "").trim() : "";
@@ -3410,6 +4271,7 @@ class App {
 
     const showCustomPexels = (pMode === "custom");
     if (this.pexelsCustomKeyBox) this.pexelsCustomKeyBox.classList.toggle("hidden", !showCustomPexels);
+    this._renderRuntimeStatusPanel();
   }
 
 
@@ -3418,13 +4280,9 @@ class App {
     return {
       llm: {
         model: s(this.customLlmModel?.value),
-        base_url: s(this.customLlmBaseUrl?.value),
-        api_key: s(this.customLlmApiKey?.value),
       },
       vlm: {
         model: s(this.customVlmModel?.value),
-        base_url: s(this.customVlmBaseUrl?.value),
-        api_key: s(this.customVlmApiKey?.value),
       },
     };
   }
@@ -3434,11 +4292,11 @@ class App {
     const vlm = cfg?.vlm || {};
     const miss = (x) => !x || !String(x).trim();
 
-    if (needLlm && (miss(llm.model) || miss(llm.base_url) || miss(llm.api_key))) {
-      return "custom llm config is incomplete: please fill in model/base_url/api_key";
+    if (needLlm && miss(llm.model)) {
+      return "custom llm config is incomplete: please fill in model";
     }
-    if (needVlm && (miss(vlm.model) || miss(vlm.base_url) || miss(vlm.api_key))) {
-      return "custom vlm config is incomplete: please fill in model/base_url/api_key";
+    if (needVlm && miss(vlm.model)) {
+      return "custom vlm config is incomplete: please fill in model";
     }
     return "";
   }
@@ -3489,26 +4347,68 @@ class App {
   _makeChatSendPayload(text, attachment_ids) {
     const payload = { text, attachment_ids, lang: this.lang || "zh" };
 
-    if (this.llmModel) payload.llm_model = this.llmModel;
-    if (this.vlmModel) payload.vlm_model = this.vlmModel;
+    if (this.llmModel) payload.llm_model = this._runtimeModelKeyForSelection(this.llmModel);
+    if (this.vlmModel) payload.vlm_model = this._runtimeModelKeyForSelection(this.vlmModel);
 
     const rc = {};
 
-    const needLlmCustom = (this.llmModel === CUSTOM_MODEL_KEY);
-    const needVlmCustom = (this.vlmModel === CUSTOM_MODEL_KEY);
+    const needLlmCustom = this._isCustomModelSelection(this.llmModel);
+    const needVlmCustom = this._isCustomModelSelection(this.vlmModel);
+    const llmProvider = this._providerNameFromModelSelection(this.llmModel);
+    const vlmProvider = this._providerNameFromModelSelection(this.vlmModel);
+    const usesCodex = (needLlmCustom && llmProvider === "codex") || (needVlmCustom && vlmProvider === "codex");
+    const codexModel = usesCodex ? this._selectedCodexModel() : "";
+    const codexReasoning = usesCodex ? this._selectedCodexReasoning() : "";
+
+    if (usesCodex) {
+      if (!this._codexSignedIn()) {
+        return { error: __t("sidebar.codex_auth_required") };
+      }
+      if (!codexModel) {
+        return { error: __t("sidebar.codex_model_required") };
+      }
+    }
 
     if (needLlmCustom || needVlmCustom) {
       const cm = this._readCustomModelsFromUI();
-      const err = this._validateCustomModels(cm, { needLlm: needLlmCustom, needVlm: needVlmCustom });
+      const err = this._validateCustomModels(cm, {
+        needLlm: needLlmCustom && llmProvider !== "codex",
+        needVlm: needVlmCustom && vlmProvider !== "codex",
+      });
       if (err) return { error: err };
 
       rc.custom_models = {};
-      if (needLlmCustom) rc.custom_models.llm = cm.llm;
-      if (needVlmCustom) rc.custom_models.vlm = cm.vlm;
+      if (needLlmCustom) {
+        rc.custom_models.llm = (llmProvider === "codex")
+          ? {
+              provider: "codex",
+              model: codexModel,
+              reasoning_effort: codexReasoning,
+            }
+          : {
+              provider: llmProvider,
+              model: cm.llm.model,
+            };
+      }
+      if (needVlmCustom) {
+        rc.custom_models.vlm = (vlmProvider === "codex")
+          ? {
+              provider: "codex",
+              model: codexModel,
+              reasoning_effort: codexReasoning,
+            }
+          : {
+              provider: vlmProvider,
+              model: cm.vlm.model,
+            };
+      }
     }
 
     const tts = this._readProviderConfigFromUI("tts");
     if (tts) rc.tts = tts;
+
+    const bgm = this._readProviderConfigFromUI("bgm");
+    if (bgm) rc.bgm = bgm;
 
     const aiTransition = this._readProviderConfigFromUI("ai_transition");
     if (aiTransition) rc.ai_transition = aiTransition;
@@ -3692,7 +4592,11 @@ class App {
     if (this.llmSelect) {
       this.llmSelect.addEventListener("change", () => {
         const v = (this.llmSelect.value || "").trim();
-        if (v) this.llmModel = v;
+        if (v) {
+          this.llmModel = v;
+          const provider = this._providerNameFromModelSelection(v);
+          if (provider) this._applyModelProviderPreset("llm", provider, { force: true });
+        }
         this._syncConfigPanels();
       });
     }
@@ -3700,12 +4604,85 @@ class App {
     if (this.vlmSelect) {
       this.vlmSelect.addEventListener("change", () => {
         const v = (this.vlmSelect.value || "").trim();
-        if (v) this.vlmModel = v;
+        if (v) {
+          this.vlmModel = v;
+          const provider = this._providerNameFromModelSelection(v);
+          if (provider) this._applyModelProviderPreset("vlm", provider, { force: true });
+        }
         this._syncConfigPanels();
       });
     }
 
-    ["tts", "ai_transition"].forEach((kind) => {
+    if (this.codexLoginDeviceBtn) {
+      this.codexLoginDeviceBtn.addEventListener("click", async () => {
+        try {
+          this.codexLoginState = await this.api.startCodexLogin("device_code");
+          this._renderCodexAuthState();
+          this._maybeOpenCodexLoginUrl(this.codexLoginState);
+          void this._pollCodexLoginCompletion();
+        } catch (err) {
+          this.ui.showToast(String(err?.message || err || ""));
+          setTimeout(() => this.ui.hideToast(), 2200);
+        }
+      });
+    }
+
+    if (this.codexLoginBrowserBtn) {
+      this.codexLoginBrowserBtn.addEventListener("click", async () => {
+        try {
+          this.codexLoginState = await this.api.startCodexLogin("browser");
+          this._renderCodexAuthState();
+          this._maybeOpenCodexLoginUrl(this.codexLoginState);
+          void this._pollCodexLoginCompletion();
+        } catch (err) {
+          this.ui.showToast(String(err?.message || err || ""));
+          setTimeout(() => this.ui.hideToast(), 2200);
+        }
+      });
+    }
+
+    if (this.codexRefreshBtn) {
+      this.codexRefreshBtn.addEventListener("click", async () => {
+        await this.refreshCodexState({ autoSelect: true });
+        await this.refreshRuntimeHealth();
+      });
+    }
+
+    if (this.codexLogoutBtn) {
+      this.codexLogoutBtn.addEventListener("click", async () => {
+        try {
+          await this.api.logoutCodex();
+        } catch (err) {
+          console.warn("[codex] logout failed:", err);
+        }
+        this.codexLoginState = null;
+        await this.refreshCodexState({ autoSelect: false });
+        await this.refreshRuntimeHealth();
+      });
+    }
+
+    if (this.runtimeHealthRefreshBtn) {
+      this.runtimeHealthRefreshBtn.addEventListener("click", async () => {
+        await this.refreshRuntimeHealth();
+      });
+    }
+
+    if (this.codexModelSelect) {
+      this.codexModelSelect.addEventListener("change", () => {
+        this._renderCodexControls();
+      });
+    }
+
+    ["llm", "vlm"].forEach((kind) => {
+      const { modelInput } = this._getCustomModelInputs(kind);
+      [modelInput].forEach((input) => {
+        if (!input) return;
+        input.addEventListener("input", () => this._syncConfigPanels());
+        input.addEventListener("change", () => this._syncConfigPanels());
+      });
+    });
+
+    ["bgm", "tts", "ai_transition"].forEach((kind) => {
       const panel = this._getProviderPanel(kind);
       if (!panel?.select) return;
       panel.select.addEventListener("change", () => this._syncConfigPanels());
@@ -4139,6 +5116,9 @@ class App {
         state: data.is_error ? "error" : "success",
         summary: (data && Object.prototype.hasOwnProperty.call(data, "summary")) ? data.summary : null,
       });
+      if (data && Array.isArray(data.pending_media)) {
+        this.setPending(data.pending_media || []);
+      }
       this.ui.appendDevSummary(data.tool_call_id, {
         server: data.server,
         name: data.name,
@@ -4384,6 +5364,35 @@ function __osSetByPath(obj, path, value) {
   cur[parts[parts.length - 1]] = value;
 }
 
+function __osDeleteByPath(obj, path) {
+  const parts = String(path).split(".").filter(Boolean);
+  if (!obj || !parts.length) return;
+
+  let cur = obj;
+  for (let i = 0; i < parts.length - 1; i++) {
+    const key = parts[i];
+    if (!cur || typeof cur !== "object" || !cur[key] || typeof cur[key] !== "object") return;
+    cur = cur[key];
+  }
+
+  if (cur && typeof cur === "object") {
+    delete cur[parts[parts.length - 1]];
+  }
+}
+
+function __osScrubSensitivePersistedFields() {
+  const cfg = __osLoadConfig();
+  let changed = false;
+
+  __OS_SENSITIVE_PERSIST_PATHS.forEach((path) => {
+    if (__osGetByPath(cfg, path) == null) return;
+    __osDeleteByPath(cfg, path);
+    changed = true;
+  });
+
+  if (changed) __osSaveConfig(cfg);
+}
+
 const __osPendingSelectValues = new Map();
 
 function __osApplySelectValue(selectEl, desiredValue) {
@@ -4495,6 +5504,7 @@ function __osBindPersistedFields(root = document) {
 }
 
 function __osInitPersistSidebarConfig() {
+  __osScrubSensitivePersistedFields();
   __osHydratePersistedFields(document);
   window.OPENSTORYLINE_PERSIST = __osBindPersistedFields(document); // 可选：调试用
 }

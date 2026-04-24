@@ -322,6 +322,16 @@ class ToolInterceptor:
                 'artifact_id': artifact_id,
                 'lang': lang,
             }
+            chat_model_key = str(getattr(context, "chat_model_key", "") or "").strip()
+            vlm_model_key = str(getattr(context, "vlm_model_key", "") or "").strip()
+            codex_model = str(getattr(context, "codex_model", "") or "").strip()
+            codex_reasoning_effort = str(getattr(context, "codex_reasoning_effort", "") or "").strip().lower()
+            if codex_model and ("__provider__:codex" in {chat_model_key, vlm_model_key}):
+                new_req_args["_storyline_sampling_backend"] = "codex"
+                new_req_args["_storyline_sampling_model"] = codex_model
+                if codex_reasoning_effort:
+                    new_req_args["_storyline_sampling_reasoning_effort"] = codex_reasoning_effort
+                new_req_args["_storyline_sampling_cwd"] = os.getcwd()
             new_req_args.update(request.args)
             new_req_args.update(input_data)
 
@@ -461,6 +471,20 @@ class ToolInterceptor:
             handler,
             tool_name_keyword="generate_ai_transition",
             context_attr="ai_transition_config",
+        )
+
+    @staticmethod
+    async def inject_bgm_config(request: MCPToolCallRequest, handler):
+        """
+        Interceptor: Injects runtime.context.bgm_config parameters into request.args
+        before invoking background-music recommendation/generation tools.
+        - bgm_config: {"provider": "localai", "localai": {...}}
+        """
+        return await ToolInterceptor._inject_provider_config(
+            request,
+            handler,
+            tool_name_keyword="select_bgm",
+            context_attr="bgm_config",
         )
     
     @staticmethod

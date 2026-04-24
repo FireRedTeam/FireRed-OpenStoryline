@@ -4,9 +4,13 @@ from typing import Optional, Any
 import logging
 
 import httpx
+from openai import AsyncOpenAI
 
-from langchain.agents import create_agent
 from langchain_openai import ChatOpenAI
+
+from agents import Agent as OpenAIAgent
+from agents.model_settings import ModelSettings
+from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
 
 from langchain_mcp_adapters.callbacks import Callbacks
 from langchain_mcp_adapters.client import MultiServerMCPClient
@@ -14,11 +18,40 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 from open_storyline.config import Settings
 from open_storyline.storage.agent_memory import ArtifactStore
 from open_storyline.nodes.node_manager import NodeManager
-from open_storyline.mcp.hooks.chat_middleware import handle_tool_errors, on_progress, log_tool_request
+from open_storyline.mcp.hooks.chat_middleware import on_progress
 from open_storyline.mcp.sampling_handler import make_sampling_callback
+from open_storyline.openai_agents_runtime import (
+    OpenAIAgentsRuntime,
+    build_agents_function_tools,
+)
+from open_storyline.codex.runtime import CodexRuntime
+from open_storyline.codex.sampling_handler import make_codex_sampling_callback
 from open_storyline.skills.skills_io import load_skills
 
 logger = logging.getLogger(__name__)
+
+
+def _walk_exception_tree(exc: BaseException):
+    yield exc
+    if isinstance(exc, BaseExceptionGroup):
+        for sub in exc.exceptions:
+            yield from _walk_exception_tree(sub)
+    cause = getattr(exc, "__cause__", None)
+    if cause is not None and cause is not exc:
+        yield from _walk_exception_tree(cause)
+    context = getattr(exc, "__context__", None)
+    if context is not None and context is not exc:
+        yield from _walk_exception_tree(context)
+
+
+def _is_mcp_connection_failure(exc: BaseException) -> bool:
+    for item in _walk_exception_tree(exc):
+        if isinstance(item, (httpx.ConnectError, ConnectionError, TimeoutError)):
+            return True
+        message = str(item or "")
+        if "All connection attempts failed" in message or "Couldn't connect to server" in message:
+            return True
+    return False
 
 async def validate_api_key(base_url: str, api_key: str, model: str, provider: str = "LLM", timeout: float = 10.0) -> bool:
     """
@@ -112,7 +145,7 @@ async def validate_api_key(base_url: str, api_key: str, model: str, provider: st
             f"{provider} API connection timeout. Please check your network or base_url.\n"
             f"Model: {model}\n"
             f"Base URL: {base_url}\n"
-            f"Error: Connection timed out after 10 seconds"
+            f"Error: Connection timed out after {timeout:g} seconds"
         )
     except httpx.ConnectError as e:
         logger.warning(f"{provider} API connection failed: {e}")
@@ -138,9 +171,55 @@ class ClientContext:
     vlm_model_key: str = ""  # VLM model key
     pexels_api_key: Optional[str] = None
     tts_config: Optional[dict] = None  # TTS config at runtime
+    bgm_config: Optional[dict] = None  # BGM provider config at runtime
     ai_transition_config: Optional[dict] = None # AI transition config at runtime
     llm_pool: dict[tuple[str, bool], ChatOpenAI] = field(default_factory=dict)
     lang: str = "zh" # Default language: Chinese
+    codex_model: str = ""
+    codex_reasoning_effort: str = ""
+    codex_turn_attachments: list[Any] = field(default_factory=list)
+
+
+async def _build_storyline_tools(
+    cfg: Settings,
+    session_id: str,
+    *,
+    sampling_callback,
+    tool_interceptors=None,
+    allow_mcp_failure: bool = False,
+):
+    connections = {
+        cfg.local_mcp_server.server_name: {
+            "transport": cfg.local_mcp_server.server_transport,
+            "url": cfg.local_mcp_server.url,
+            "timeout": timedelta(seconds=cfg.local_mcp_server.timeout),
+            "sse_read_timeout": timedelta(minutes=30),
+            "headers": {"X-Storyline-Session-Id": session_id},
+            "session_kwargs": {"sampling_callback": sampling_callback},
+        },
+    }
+
+    client = MultiServerMCPClient(
+        connections=connections,
+        tool_interceptors=tool_interceptors,
+        callbacks=Callbacks(on_progress=on_progress),
+        tool_name_prefix=True,
+    )
+
+    skills = await load_skills(cfg.skills.skill_dir)
+    try:
+        tools = await client.get_tools()
+    except Exception as exc:
+        if not allow_mcp_failure or not _is_mcp_connection_failure(exc):
+            raise
+        logger.warning(
+            "Local MCP server is unavailable for session %s; continuing without node tools.",
+            session_id,
+            exc_info=exc,
+        )
+        return [], skills, NodeManager()
+    node_manager = NodeManager(tools)
+    return tools, skills, node_manager
 
 
 async def build_agent(
@@ -210,34 +289,83 @@ async def build_agent(
 
     sampling_callback = make_sampling_callback(llm, vlm)
 
-    connections = {
-        cfg.local_mcp_server.server_name: {
-            "transport": cfg.local_mcp_server.server_transport,
-            "url": cfg.local_mcp_server.url,
-            "timeout": timedelta(seconds=cfg.local_mcp_server.timeout),
-            "sse_read_timeout": timedelta(minutes=30),
-            "headers": {"X-Storyline-Session-Id": session_id},
-            "session_kwargs": {"sampling_callback": sampling_callback},
-        },
-    }
-
-    client = MultiServerMCPClient(
-        connections=connections,
+    tools, skills, node_manager = await _build_storyline_tools(
+        cfg,
+        session_id,
+        sampling_callback=sampling_callback,
         tool_interceptors=tool_interceptors,
-        callbacks=Callbacks(on_progress=on_progress),
-        tool_name_prefix=True,
+        allow_mcp_failure=True,
     )
 
-    tools = await client.get_tools()
-    skills = await load_skills(cfg.skills.skill_dir) # Load skills
-    node_manager = NodeManager(tools)
+    model = OpenAIChatCompletionsModel(
+        model=llm_model,
+        openai_client=AsyncOpenAI(
+            base_url=llm_base_url,
+            api_key=llm_api_key,
+            timeout=llm_timeout,
+            max_retries=llm_max_retries,
+            default_headers={
+                "api-key": llm_api_key,
+                "Content-Type": "application/json",
+            },
+        ),
+    )
 
-    # 4) Use LangChain's agent runtime to handle the multi-turn tool calling loop
-    agent = create_agent(
-        model=llm,
-        tools=tools+skills,
-        middleware=[log_tool_request, handle_tool_errors],
+    runtime_tools = build_agents_function_tools([*tools, *skills], store)
+    agent = OpenAIAgentsRuntime(
+        OpenAIAgent(
+            name="open_storyline",
+            instructions=(
+                "Follow the provided conversation history and use the available tools when needed. "
+                "Treat the provided system messages as the source of truth for language and behavior."
+            ),
+            model=model,
+            tools=runtime_tools,
+            model_settings=ModelSettings(
+                temperature=llm_temperature,
+                parallel_tool_calls=False,
+            ),
+        )
+    )
+    return agent, node_manager
+
+
+async def build_codex_agent(
+    cfg: Settings,
+    session_id: str,
+    store: ArtifactStore,
+    tool_interceptors=None,
+    *,
+    model: str,
+    reasoning_effort: str | None = None,
+    binary: str = "codex",
+    cwd: str = ".",
+    sandbox: str = "danger-full-access",
+    approval_policy: str = "never",
+):
+    sampling_callback = make_codex_sampling_callback(
+        binary=binary,
+        cwd=cwd,
+        model=model,
+        reasoning_effort=reasoning_effort,
+        sandbox=sandbox,
+        approval_policy=approval_policy,
+    )
+    tools, skills, node_manager = await _build_storyline_tools(
+        cfg,
+        session_id,
+        sampling_callback=sampling_callback,
+        tool_interceptors=tool_interceptors,
+        allow_mcp_failure=True,
+    )
+    agent = CodexRuntime(
+        binary=binary,
+        cwd=cwd,
+        model=model,
+        reasoning_effort=reasoning_effort,
+        sandbox=sandbox,
+        approval_policy=approval_policy,
+        langchain_tools=[*tools, *skills],
         store=store,
-        context_schema=ClientContext,
     )
     return agent, node_manager

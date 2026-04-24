@@ -15,6 +15,7 @@ from open_storyline.nodes.core_nodes.base_node import BaseNode, NodeMeta
 from open_storyline.nodes.node_schema import GenerateVoiceoverInput
 from open_storyline.nodes.node_state import NodeState
 from open_storyline.utils.logging import get_logger
+from open_storyline.utils.localai_auth import resolve_localai_shared_token
 from open_storyline.utils.parse_json import parse_json_dict
 from open_storyline.utils.prompts import get_prompt
 from open_storyline.utils.register import NODE_REGISTRY
@@ -39,9 +40,11 @@ class GenerateVoiceoverNode(BaseNode):
         "bytedance": "_tts_bytedance_sync",
         "minimax": "_tts_minimax_sync",
         "302": "_tts_302_sync",
+        "localai": "_tts_localai_sync",
     }
 
-    _DEFAULT_PROVIDER = "minimax"
+    _DEFAULT_PROVIDER = "localai"
+    _NODE_MODE_VALUES = {"auto", "skip", "default"}
 
     MILLISECONDS_PER_SECOND = 1000.0
     _SAFE_MARGIN = 10
@@ -189,6 +192,8 @@ class GenerateVoiceoverNode(BaseNode):
 
         for key in required_keys:
             value = inputs.get(key)
+            if key == "mode" and str(value or "").strip().lower() in self._NODE_MODE_VALUES:
+                value = None
             if value in (None, ""):
                 value = provider_keys.get(key)
 
@@ -202,6 +207,9 @@ class GenerateVoiceoverNode(BaseNode):
                 env_v = self._resolve_minimax_env_secret(key)
                 if env_v not in (None, ""):
                     value = env_v
+
+            if value in (None, "") and self._is_optional_provider_field(provider_name, key):
+                continue
 
             if value in (None, ""):
                 node_state.node_summary.info_for_llm("The user has not entered the voice-over service API key, please remind the user to enter the TTS API key in the sidebar of the webpage.")
@@ -221,7 +229,16 @@ class GenerateVoiceoverNode(BaseNode):
             return "https://api.minimax.chat"
         if provider_name == "302":
             return "https://api.302.ai"
+        if provider_name == "localai":
+            return "http://127.0.0.1:18080"
         return ""
+
+    def _is_optional_provider_field(self, provider_name: str, key: str) -> bool:
+        provider = str(provider_name or "").strip().lower()
+        field_name = str(key or "").strip().lower()
+        if provider == "localai" and field_name in {"api_key"}:
+            return True
+        return False
 
     # ---------------------------------------------------------------------
     # LLM param inference
@@ -649,3 +666,183 @@ class GenerateVoiceoverNode(BaseNode):
         if not resp.ok:
             raise RuntimeError(f"302 tts http {resp.status_code}: {resp.text}")
         wav_path.write_bytes(resp.content)
+
+    def _tts_localai_sync(
+        self,
+        *,
+        text: str,
+        wav_path: Path,
+        secrets: Dict[str, Any],
+        tts_params: Dict[str, Any],
+        provider_cfg: Dict[str, Any],
+    ) -> None:
+        base_url = (secrets.get("base_url") or self._default_base_url("localai")).rstrip("/")
+        mode = str(
+            tts_params.get("mode")
+            or secrets.get("mode")
+            or provider_cfg.get("mode")
+            or "direct"
+        ).strip().lower()
+
+        if mode == "gateway":
+            self._tts_localai_gateway_sync(
+                text=text,
+                wav_path=wav_path,
+                base_url=base_url,
+                secrets=secrets,
+                tts_params=tts_params,
+                provider_cfg=provider_cfg,
+            )
+            return
+
+        api_url = base_url + "/tts"
+
+        model = (
+            tts_params.get("model")
+            or secrets.get("model")
+            or provider_cfg.get("model")
+            or "pocket-tts"
+        )
+        backend = tts_params.get("backend") or secrets.get("backend") or provider_cfg.get("backend")
+        language = tts_params.get("language") or provider_cfg.get("language")
+        stream = tts_params.get("stream")
+        if isinstance(stream, str):
+            stream = stream.strip().lower() in {"1", "true", "yes", "on"}
+        elif stream is None:
+            stream = False
+
+        headers = {
+            "Content-Type": "application/json",
+        }
+        api_key = self._resolve_localai_api_key(secrets)
+        if isinstance(api_key, str) and api_key.strip():
+            headers["Authorization"] = f"Bearer {api_key.strip()}"
+
+        body: Dict[str, Any] = {
+            "input": text,
+            "model": model,
+        }
+        if backend:
+            body["backend"] = backend
+        if language:
+            body["language"] = language
+        if stream:
+            body["stream"] = True
+
+        resp = requests.post(api_url, headers=headers, json=body, timeout=120)
+        if not resp.ok:
+            raise RuntimeError(f"LocalAI tts http {resp.status_code}: {resp.text}")
+        wav_path.write_bytes(resp.content)
+
+    def _tts_localai_gateway_sync(
+        self,
+        *,
+        text: str,
+        wav_path: Path,
+        base_url: str,
+        secrets: Dict[str, Any],
+        tts_params: Dict[str, Any],
+        provider_cfg: Dict[str, Any],
+    ) -> None:
+        api_key = self._resolve_localai_api_key(secrets)
+        if not api_key:
+            raise ValueError("local-ai-platform TTS missing api_key / shared token")
+
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        voice_provider = (
+            tts_params.get("voice_provider")
+            or secrets.get("voice_provider")
+            or provider_cfg.get("voice_provider")
+            or "voxcpm"
+        )
+        voice_id = (
+            tts_params.get("voice_id")
+            or secrets.get("voice_id")
+            or provider_cfg.get("voice_id")
+            or "default"
+        )
+        output_format = (
+            tts_params.get("format")
+            or secrets.get("format")
+            or provider_cfg.get("format")
+            or "wav"
+        )
+
+        sample_rate_raw = (
+            tts_params.get("sample_rate_hz")
+            or secrets.get("sample_rate_hz")
+            or provider_cfg.get("sample_rate_hz")
+        )
+        sample_rate_hz = None
+        if sample_rate_raw not in (None, ""):
+            try:
+                sample_rate_hz = int(sample_rate_raw)
+            except Exception:
+                sample_rate_hz = None
+
+        body: Dict[str, Any] = {
+            "script": {"text": text},
+            "voice": {
+                "provider": str(voice_provider).strip(),
+                "voice_id": str(voice_id).strip(),
+            },
+            "output": {
+                "format": str(output_format).strip() or "wav",
+            },
+        }
+        if sample_rate_hz is not None:
+            body["output"]["sample_rate_hz"] = sample_rate_hz
+
+        resp = requests.post(f"{base_url}/api/v1/jobs/tts", headers=headers, json=body, timeout=60)
+        if not resp.ok:
+            raise RuntimeError(f"local-ai-platform tts job create http {resp.status_code}: {resp.text}")
+        data = resp.json().get("data") or {}
+        job_id = str(data.get("job_id") or data.get("id") or "").strip()
+        if not job_id:
+            raise RuntimeError(f"local-ai-platform tts job create returned no job_id: {resp.text}")
+
+        job = self._poll_localai_job(base_url, api_key, job_id, timeout_seconds=180.0)
+        result_asset_ids = job.get("result_asset_ids") or []
+        if not result_asset_ids:
+            raise RuntimeError(f"local-ai-platform tts job {job_id} succeeded but returned no result assets")
+
+        asset_id = str(result_asset_ids[0]).strip()
+        asset_resp = requests.get(
+            f"{base_url}/api/v1/assets/{asset_id}/content",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=120,
+        )
+        if not asset_resp.ok:
+            raise RuntimeError(f"local-ai-platform tts asset download http {asset_resp.status_code}: {asset_resp.text}")
+        wav_path.write_bytes(asset_resp.content)
+
+    @staticmethod
+    def _resolve_localai_api_key(secrets: Dict[str, Any]) -> str:
+        for key in ("api_key", "token", "access_token"):
+            value = secrets.get(key)
+            if isinstance(value, str) and value.strip():
+                return resolve_localai_shared_token(value)
+        return resolve_localai_shared_token()
+
+    @staticmethod
+    def _poll_localai_job(base_url: str, api_key: str, job_id: str, *, timeout_seconds: float) -> Dict[str, Any]:
+        deadline = time.time() + max(timeout_seconds, 1.0)
+        headers = {"Authorization": f"Bearer {api_key}"}
+        job_url = f"{base_url.rstrip('/')}/api/v1/jobs/{job_id}"
+
+        while time.time() < deadline:
+            resp = requests.get(job_url, headers=headers, timeout=60)
+            if not resp.ok:
+                raise RuntimeError(f"local-ai-platform job poll http {resp.status_code}: {resp.text}")
+            data = resp.json().get("data") or {}
+            status = str(data.get("status") or "").strip().lower()
+            if status in {"succeeded", "completed", "success"}:
+                return data
+            if status in {"failed", "error", "cancelled", "canceled"}:
+                raise RuntimeError(f"local-ai-platform job {job_id} failed: {data.get('error') or data}")
+            time.sleep(1.0)
+
+        raise TimeoutError(f"local-ai-platform job {job_id} timed out after {timeout_seconds:.0f}s")

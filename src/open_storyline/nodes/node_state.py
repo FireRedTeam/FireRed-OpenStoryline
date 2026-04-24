@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from open_storyline.mcp.sampling_requester import SamplingLLMClient
+from open_storyline.mcp.sampling_requester import LLMClient
 from open_storyline.nodes.node_summary import NodeSummary
 
 from mcp.server.fastmcp import Context
@@ -13,5 +13,5 @@ class NodeState:
     artifact_id: str
     lang: str
     node_summary: NodeSummary
-    llm: SamplingLLMClient
+    llm: LLMClient
     mcp_ctx: Context[ServerSession, object]

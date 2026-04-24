@@ -3,6 +3,7 @@ from dataclasses import asdict
 from typing import Annotated
 from pydantic import BaseModel, Field
 import inspect
+import os
 import traceback
 
 from open_storyline.config import Settings
@@ -10,6 +11,7 @@ from open_storyline.skills.skills_io import dump_skills
 from open_storyline.utils.register import NODE_REGISTRY
 
 from open_storyline.mcp.sampling_requester import make_llm
+from open_storyline.codex.sampling_handler import CodexSamplingLLMClient
 from open_storyline.nodes.core_nodes.base_node import BaseNode
 from open_storyline.nodes.node_summary import NodeSummary
 from open_storyline.nodes.node_state import NodeState
@@ -17,6 +19,31 @@ from src.open_storyline.storage.agent_memory import ArtifactStore
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.session import ServerSession
+
+_SAMPLING_BACKEND_KEY = "_storyline_sampling_backend"
+_SAMPLING_MODEL_KEY = "_storyline_sampling_model"
+_SAMPLING_REASONING_KEY = "_storyline_sampling_reasoning_effort"
+_SAMPLING_CWD_KEY = "_storyline_sampling_cwd"
+
+
+def _build_node_llm_from_params(mcp_ctx: Context, params: dict[str, object]):
+    backend = str(params.pop(_SAMPLING_BACKEND_KEY, "") or "").strip().lower()
+    if backend != "codex":
+        params.pop(_SAMPLING_MODEL_KEY, None)
+        params.pop(_SAMPLING_REASONING_KEY, None)
+        params.pop(_SAMPLING_CWD_KEY, None)
+        return make_llm(mcp_ctx)
+
+    model = str(params.pop(_SAMPLING_MODEL_KEY, "") or "").strip() or "gpt-5.4"
+    reasoning_effort = str(params.pop(_SAMPLING_REASONING_KEY, "") or "").strip().lower() or None
+    cwd = str(params.pop(_SAMPLING_CWD_KEY, "") or "").strip() or os.getcwd()
+    return CodexSamplingLLMClient(
+        binary="codex",
+        cwd=cwd,
+        model=model,
+        reasoning_effort=reasoning_effort,
+        sandbox="danger-full-access",
+    )
 
 def create_tool_wrapper(node: BaseNode, input_schema: type[BaseModel]):
     """
@@ -41,13 +68,14 @@ def create_tool_wrapper(node: BaseNode, input_schema: type[BaseModel]):
         req_json = await request.json()
         params = kwargs.copy()
         params.update(req_json.get('params', {}).get('arguments', {}))
+        llm = _build_node_llm_from_params(mcp_ctx, params)
 
         node_state = NodeState(
             session_id=session_id,
             artifact_id=params['artifact_id'],
             lang=params.get('lang', 'zh'),
             node_summary=NodeSummary(),
-            llm=make_llm(mcp_ctx),
+            llm=llm,
             mcp_ctx=mcp_ctx,
         )
         result = await node(node_state, **params)

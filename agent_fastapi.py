@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import ast
 import errno
 import mimetypes
 import os
@@ -36,6 +37,7 @@ import anyio
 from fastapi import FastAPI, APIRouter, UploadFile, File, Form, HTTPException, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel as PydanticModel
 
 from langchain_core.messages import SystemMessage, HumanMessage, BaseMessage, AIMessage, ToolMessage
 
@@ -45,7 +47,7 @@ SRC_DIR = os.path.join(ROOT_DIR, "src")
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-from open_storyline.agent import build_agent, ClientContext
+from open_storyline.agent import build_agent, build_codex_agent, ClientContext
 from open_storyline.utils.prompts import get_prompt
 from open_storyline.utils.media_handler import scan_media_dir
 from open_storyline.utils.ai_transition_cancel import (
@@ -54,9 +56,22 @@ from open_storyline.utils.ai_transition_cancel import (
 )
 from open_storyline.config import load_settings, default_config_path
 from open_storyline.config import Settings
+from open_storyline.model_provider_presets import (
+    build_model_provider_ui_schema,
+    resolve_model_provider_override,
+)
+from open_storyline.codex import (
+    CodexAppServerClient,
+    normalize_codex_account_response,
+    normalize_codex_login_response,
+    normalize_codex_model_list_response,
+    normalize_codex_rate_limits_response,
+)
 from open_storyline.storage.agent_memory import ArtifactStore
 from open_storyline.mcp.hooks.node_interceptors import ToolInterceptor
 from open_storyline.mcp.hooks.chat_middleware import set_mcp_log_sink, reset_mcp_log_sink
+from open_storyline.mcp.local_server_manager import LocalMCPServerManager
+from open_storyline.runtime_health import build_runtime_health_snapshot
 
 WEB_DIR = os.path.join(ROOT_DIR, "web")
 STATIC_DIR = os.path.join(WEB_DIR, "static")
@@ -72,6 +87,7 @@ CHUNK_SIZE = 1024 * 1024  # 1MB
 USE_SESSION_SUBDIR = True
 
 CUSTOM_MODEL_KEY = "__custom__"
+MODEL_PROVIDER_KEY_PREFIX = "__provider__:"
 SESSION_STATE_FILENAME = "session_state.json"
 SESSION_STATE_MAX_HISTORY = 2000
 SESSION_STATE_MAX_LC_MESSAGES = 4000
@@ -89,6 +105,13 @@ def _s(x: Any) -> str:
 def _norm_url(u: Any) -> str:
     u = _s(u)
     return u.rstrip("/") if u else ""
+
+
+def _provider_name_from_model_key(value: Any) -> str:
+    text = _s(value)
+    if text.startswith(MODEL_PROVIDER_KEY_PREFIX):
+        return text[len(MODEL_PROVIDER_KEY_PREFIX):]
+    return ""
 
 
 def _ai_transition_cancel_cache_root(cfg: Settings) -> Path:
@@ -171,7 +194,7 @@ def _peek_builtin_model_name(kind: str, cfg: Settings) -> str:
     if resolved and resolved.get("model"):
         return _s(resolved["model"])
 
-    return "unknown model"
+    return ""
 
 def _stable_dict_key(d: Optional[Dict[str, Any]]) -> str:
     try:
@@ -190,7 +213,11 @@ def _parse_provider_runtime_config(service_cfg: Any, key_name: str) -> Dict[str,
 
     provider_block = cfg.get(provider)
     if not isinstance(provider_block, dict):
-        provider_block = {}
+        provider_block = {
+            k: v
+            for k, v in cfg.items()
+            if _s(k) != "provider"
+        }
 
     return {"provider": provider, provider: provider_block}
 
@@ -200,14 +227,15 @@ def _parse_service_config(service_cfg: Any) -> Tuple[
     Dict[str, Any],
     Dict[str, Any],
     Dict[str, Any],
+    Dict[str, Any],
     Optional[str]]:
     """
-    返回 (custom_llm, custom_vlm, tts_cfg, ai_transition_cfg, pexels, err)
+    返回 (custom_llm, custom_vlm, tts_cfg, ai_transition_cfg, bgm_cfg, pexels, err)
     - custom_llm/custom_vlm: {"model","base_url","api_key"} 或 None（允许只传 llm 或只传 vlm）
-    - tts_cfg: dict（可能为空）
+    - tts_cfg/bgm_cfg: dict（可能为空）
     """
     if not isinstance(service_cfg, dict):
-        return None, None, {}, {}, {}, None
+        return None, None, {}, {}, {}, {}, None
 
     # ---- custom models ----
     custom_llm = None
@@ -216,13 +244,24 @@ def _parse_service_config(service_cfg: Any) -> Tuple[
 
     if custom_models is not None:
         if not isinstance(custom_models, dict):
-            return None, None, {}, {}, {}, "service_config.custom_models 必须是对象"
+            return None, None, {}, {}, {}, {}, "service_config.custom_models 必须是对象"
 
-        def _pick(m: Any, label: str) -> Tuple[Optional[Dict[str, str]], Optional[str]]:
+        def _pick(m: Any, label: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
             if m is None:
                 return None, None
             if not isinstance(m, dict):
                 return None, f"service_config.custom_models.{label} 必须是对象"
+
+            provider = _s(m.get("provider")).lower()
+            if provider:
+                model = _s(m.get("model"))
+                if not model:
+                    return None, f"自定义 {label.upper()} 配置不完整：请填写 provider/model"
+                out: Dict[str, Any] = {"provider": provider, "model": model}
+                reasoning_effort = _s(m.get("reasoning_effort")).lower()
+                if reasoning_effort:
+                    out["reasoning_effort"] = reasoning_effort
+                return out, None
 
             model = _s(m.get("model"))
             base_url = _norm_url(m.get("base_url"))
@@ -236,15 +275,16 @@ def _parse_service_config(service_cfg: Any) -> Tuple[
 
         custom_llm, err1 = _pick(custom_models.get("llm"), "llm")
         if err1:
-            return None, None, {}, {}, {}, err1
+            return None, None, {}, {}, {}, {}, err1
 
         custom_vlm, err2 = _pick(custom_models.get("vlm"), "vlm")
         if err2:
-            return None, None, {}, {}, {}, err2
+            return None, None, {}, {}, {}, {}, err2
 
     # ---- provider runtime config ----
     tts_cfg = _parse_provider_runtime_config(service_cfg, "tts")
     ai_transition_cfg = _parse_provider_runtime_config(service_cfg, "ai_transition")
+    bgm_cfg = _parse_provider_runtime_config(service_cfg, "bgm")
 
     # ---- pexels ----
     pexels_cfg: Dict[str, Any] = {}
@@ -267,7 +307,7 @@ def _parse_service_config(service_cfg: Any) -> Tuple[
             api_key = _s(search_media.get("pexels_api_key") or search_media.get("pexels_api_key"))
             pexels_cfg = {"mode": mode, "api_key": api_key}
 
-    return custom_llm, custom_vlm, tts_cfg, ai_transition_cfg, pexels_cfg, None
+    return custom_llm, custom_vlm, tts_cfg, ai_transition_cfg, bgm_cfg, pexels_cfg, None
 
 def is_developer_mode(cfg: Settings) -> bool:
     try:
@@ -354,6 +394,62 @@ def _to_json_safe(v: Any) -> Any:
         return v
     except Exception:
         return str(v)
+
+
+def _normalize_tool_summary_payload(summary: Any) -> Any:
+    """
+    Normalize tool summaries into a UI-friendly shape.
+
+    Some MCP tools return Python-literal strings like:
+      "{'summary': {'node_summary': {'preview_urls': [...]}}}"
+    while the frontend expects a JSON-like object with `preview_urls` / `INFO_USER`
+    at the top level. We coerce strings via json/ast and flatten common wrappers.
+    """
+    parsed = summary
+    if isinstance(parsed, str):
+        text = parsed.strip()
+        if not text:
+            return parsed
+        try:
+            parsed = json.loads(text)
+        except Exception:
+            try:
+                parsed = ast.literal_eval(text)
+            except Exception:
+                return summary
+
+    if not isinstance(parsed, dict):
+        return parsed
+
+    outer = parsed
+    candidate: Any = outer
+    nested_summary = outer.get("summary")
+    if isinstance(nested_summary, dict):
+        candidate = nested_summary
+
+    node_summary = candidate.get("node_summary") if isinstance(candidate, dict) else None
+    if isinstance(node_summary, dict):
+        merged = dict(node_summary)
+        if isinstance(candidate, dict):
+            for key, value in candidate.items():
+                if key == "node_summary":
+                    continue
+                merged.setdefault(key, value)
+        for key, value in outer.items():
+            if key == "summary":
+                continue
+            merged.setdefault(key, value)
+        return merged
+
+    if isinstance(candidate, dict):
+        merged = dict(candidate)
+        for key, value in outer.items():
+            if key == "summary":
+                continue
+            merged.setdefault(key, value)
+        return merged
+
+    return outer
 
 
 def _mask_secrets_recursive(v: Any) -> Any:
@@ -1237,6 +1333,67 @@ class MediaStore:
             ts=time.time(),
         )
 
+    async def copy_from_path(
+        self,
+        src_path: str,
+        *,
+        store_filename: str,
+        display_name: str,
+    ) -> MediaMeta:
+        """
+        Copy an existing local file into media_dir and index it as session media.
+        Use this for generated outputs that should remain in their original output
+        directory while also becoming reusable media library assets.
+        """
+        media_id = uuid.uuid4().hex[:10]
+
+        display_name = sanitize_filename(display_name or "unnamed")
+        store_filename = sanitize_filename(store_filename or "unnamed")
+        kind = detect_media_kind(display_name)
+
+        src_path = os.path.abspath(src_path)
+        if not os.path.exists(src_path):
+            raise HTTPException(status_code=400, detail="source media file missing")
+
+        save_path = os.path.abspath(os.path.join(self.media_dir, store_filename))
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+        if os.path.exists(save_path):
+            raise HTTPException(status_code=409, detail=f"media already exists: {store_filename}")
+
+        try:
+            shutil.copy2(src_path, save_path)
+        except OSError as e:
+            logger.exception("Failed to import generated media file")
+            if e.errno == errno.ENOSPC:
+                detail = "Failed to import media: disk full"
+            elif e.errno in (errno.EACCES, errno.EPERM):
+                detail = "Failed to import media: permission denied"
+            else:
+                detail = "Failed to import generated media"
+            raise HTTPException(status_code=500, detail=detail)
+
+        thumb_path: Optional[str] = None
+        if kind in ("image", "video"):
+            thumb_path = os.path.join(self.thumbs_dir, f"{media_id}.jpg")
+
+            if kind == "image":
+                ok = await anyio.to_thread.run_sync(make_image_thumbnail_sync, save_path, thumb_path)
+            else:
+                ok = await make_video_thumbnail_async(save_path, thumb_path)
+
+            if not ok:
+                thumb_path = save_path if kind == "image" else None
+
+        return MediaMeta(
+            id=media_id,
+            name=os.path.basename(display_name),
+            kind=kind,
+            path=os.path.abspath(save_path),
+            thumb_path=os.path.abspath(thumb_path) if thumb_path else None,
+            ts=time.time(),
+        )
+
     async def delete_files(self, meta: MediaMeta) -> None:
         root = self.media_dir
         for p in {meta.path, meta.thumb_path}:
@@ -1274,10 +1431,10 @@ class ChatSession:
         default_llm = _peek_builtin_model_name("llm", self.cfg)
         default_vlm = _peek_builtin_model_name("vlm", self.cfg)
 
-        self.chat_models = [default_llm, CUSTOM_MODEL_KEY]
+        self.chat_models = [default_llm] if default_llm else []
         self.chat_model_key = default_llm
 
-        self.vlm_models = [default_vlm, CUSTOM_MODEL_KEY]
+        self.vlm_models = [default_vlm] if default_vlm else []
         self.vlm_model_key = default_vlm
 
         self.developer_mode = is_developer_mode(cfg)
@@ -1319,6 +1476,7 @@ class ChatSession:
         self.custom_llm_config: Optional[Dict[str, Any]] = None
         self.custom_vlm_config: Optional[Dict[str, Any]] = None
         self.tts_config: Dict[str, Any] = {}
+        self.bgm_config: Dict[str, Any] = {}
         self.ai_transition_config: Dict[str, Any] = {}
         self._agent_build_key: Optional[Tuple[Any, ...]] = None
 
@@ -1570,6 +1728,7 @@ class ChatSession:
             "custom_llm_config": self._sanitize_custom_model_cfg_for_state(self.custom_llm_config),
             "custom_vlm_config": self._sanitize_custom_model_cfg_for_state(self.custom_vlm_config),
             "tts_config": self._sanitize_tts_cfg_for_state(self.tts_config),
+            "bgm_config": self._sanitize_tts_cfg_for_state(self.bgm_config),
         }
 
     def save_state_atomic(self) -> None:
@@ -1713,6 +1872,13 @@ class ChatSession:
             sess.lang = "zh"
 
         sess.history = list(data.get("history") or [])
+        for rec in sess.history:
+            if not isinstance(rec, dict):
+                continue
+            if str(rec.get("role") or "") != "tool":
+                continue
+            if "summary" in rec:
+                rec["summary"] = _normalize_tool_summary_payload(rec.get("summary"))
         sess.chat_model_key = str(data.get("chat_model_key") or sess.chat_model_key)
         sess.vlm_model_key = str(data.get("vlm_model_key") or sess.vlm_model_key)
         try:
@@ -1762,6 +1928,8 @@ class ChatSession:
         sess.custom_vlm_config = vlm_cfg if isinstance(vlm_cfg, dict) else None
         tts_cfg = data.get("tts_config")
         sess.tts_config = tts_cfg if isinstance(tts_cfg, dict) else {}
+        bgm_cfg = data.get("bgm_config")
+        sess.bgm_config = bgm_cfg if isinstance(bgm_cfg, dict) else {}
 
         sess._normalize_running_tool_records()
         sess._validate_tool_protocol_and_fail_closed()
@@ -1779,14 +1947,30 @@ class ChatSession:
             s = str(v or "").strip()
             return (not s) or s == MASKED_SECRET
 
-        if self.chat_model_key == CUSTOM_MODEL_KEY:
+        def _is_optional_secret(kind: str, provider: str, key: str) -> bool:
+            kind_name = str(kind or "").strip().lower()
+            provider_name = str(provider or "").strip().lower()
+            field_name = str(key or "").strip().lower()
+            if provider_name == "localai" and field_name == "api_key" and kind_name in {"tts", "bgm"}:
+                return True
+            return False
+
+        llm_provider = _provider_name_from_model_key(self.chat_model_key)
+        if self.chat_model_key == CUSTOM_MODEL_KEY or llm_provider:
             cfg = self.custom_llm_config if isinstance(self.custom_llm_config, dict) else {}
-            if _is_missing(cfg.get("model")) or _is_missing(cfg.get("base_url")) or _is_missing(cfg.get("api_key")):
+            if llm_provider == "codex" or str(cfg.get("auth_kind") or "").strip().lower() == "codex":
+                if _is_missing(cfg.get("model")):
+                    missing.append("custom_llm")
+            elif _is_missing(cfg.get("model")) or _is_missing(cfg.get("base_url")) or _is_missing(cfg.get("api_key")):
                 missing.append("custom_llm")
 
-        if self.vlm_model_key == CUSTOM_MODEL_KEY:
+        vlm_provider = _provider_name_from_model_key(self.vlm_model_key)
+        if self.vlm_model_key == CUSTOM_MODEL_KEY or vlm_provider:
             cfg = self.custom_vlm_config if isinstance(self.custom_vlm_config, dict) else {}
-            if _is_missing(cfg.get("model")) or _is_missing(cfg.get("base_url")) or _is_missing(cfg.get("api_key")):
+            if vlm_provider == "codex" or str(cfg.get("auth_kind") or "").strip().lower() == "codex":
+                if _is_missing(cfg.get("model")):
+                    missing.append("custom_vlm")
+            elif _is_missing(cfg.get("model")) or _is_missing(cfg.get("base_url")) or _is_missing(cfg.get("api_key")):
                 missing.append("custom_vlm")
 
         if (self.pexels_key_mode or "").lower() == "custom":
@@ -1804,11 +1988,32 @@ class ChatSession:
                 miss_secret = False
                 for k, v in block.items():
                     if _is_secret_field_name(str(k)):
+                        if _is_optional_secret("tts", provider, str(k)):
+                            continue
                         has_secret_key = True
                         if _is_missing(v):
                             miss_secret = True
                 if has_secret_key and miss_secret:
                     missing.append(f"tts:{provider}")
+
+        bgm_cfg = self.bgm_config if isinstance(self.bgm_config, dict) else {}
+        provider = str(bgm_cfg.get("provider") or "").strip().lower()
+        if provider:
+            block = bgm_cfg.get(provider)
+            if not isinstance(block, dict):
+                missing.append(f"bgm:{provider}")
+            else:
+                has_secret_key = False
+                miss_secret = False
+                for k, v in block.items():
+                    if _is_secret_field_name(str(k)):
+                        if _is_optional_secret("bgm", provider, str(k)):
+                            continue
+                        has_secret_key = True
+                        if _is_missing(v):
+                            miss_secret = True
+                if has_secret_key and miss_secret:
+                    missing.append(f"bgm:{provider}")
 
         return sorted(set(missing))
 
@@ -1893,14 +2098,26 @@ class ChatSession:
 
 
     def apply_service_config(self, service_cfg: Any) -> Tuple[bool, Optional[str]]:
-        llm, vlm, tts, ai_transition, pexels, err = _parse_service_config(service_cfg)
+        llm, vlm, tts, ai_transition, bgm, pexels, err = _parse_service_config(service_cfg)
         if err:
             return False, err
 
         if llm is not None:
-            self.custom_llm_config = llm
+            if "provider" in llm:
+                resolved_llm, err = resolve_model_provider_override(self.cfg, "llm", llm.get("provider"), llm.get("model"))
+                if err:
+                    return False, err
+                self.custom_llm_config = resolved_llm
+            else:
+                self.custom_llm_config = llm
         if vlm is not None:
-            self.custom_vlm_config = vlm
+            if "provider" in vlm:
+                resolved_vlm, err = resolve_model_provider_override(self.cfg, "vlm", vlm.get("provider"), vlm.get("model"))
+                if err:
+                    return False, err
+                self.custom_vlm_config = resolved_vlm
+            else:
+                self.custom_vlm_config = vlm
 
         # tts 允许为空；非空才覆盖
         if isinstance(tts, dict) and tts:
@@ -1908,6 +2125,9 @@ class ChatSession:
 
         if isinstance(ai_transition, dict) and ai_transition:
             self.ai_transition_config = ai_transition
+
+        if isinstance(bgm, dict) and bgm:
+            self.bgm_config = bgm
 
         # ---- pexels ----
         if isinstance(pexels, dict) and pexels:
@@ -1925,14 +2145,90 @@ class ChatSession:
         missing = self._missing_secret_config_fields()
         if missing:
             raise RuntimeError(
-                "requires_reconfig: custom llm/vlm/tts/pexels secrets missing after restart; "
+                "requires_reconfig: custom llm/vlm/tts/bgm/pexels secrets missing after restart; "
                 f"missing={','.join(missing)}"
             )
 
+        llm_provider_name = _provider_name_from_model_key(self.chat_model_key)
+        vlm_provider_name = _provider_name_from_model_key(self.vlm_model_key)
+        use_codex = llm_provider_name == "codex" or vlm_provider_name == "codex"
+
+        if use_codex:
+            codex_model = ""
+            codex_reasoning_effort = ""
+            if llm_provider_name == "codex" and isinstance(self.custom_llm_config, dict):
+                codex_model = _s(self.custom_llm_config.get("model"))
+                codex_reasoning_effort = _s(self.custom_llm_config.get("reasoning_effort")).lower()
+            if not codex_model and vlm_provider_name == "codex" and isinstance(self.custom_vlm_config, dict):
+                codex_model = _s(self.custom_vlm_config.get("model"))
+            if not codex_reasoning_effort and vlm_provider_name == "codex" and isinstance(self.custom_vlm_config, dict):
+                codex_reasoning_effort = _s(self.custom_vlm_config.get("reasoning_effort")).lower()
+            if not codex_model:
+                codex_model = _s(getattr(self.cfg.codex, "default_model", "gpt-5.4")) or "gpt-5.4"
+            if not codex_reasoning_effort:
+                codex_reasoning_effort = _s(getattr(self.cfg.codex, "default_reasoning_effort", "medium")) or "medium"
+
+            agent_build_key = ("codex", codex_model, codex_reasoning_effort)
+            if self.agent is None or self._agent_build_key != agent_build_key:
+                artifact_store = ArtifactStore(self.cfg.project.outputs_dir, session_id=self.session_id)
+                self.agent, self.node_manager = await build_codex_agent(
+                    cfg=self.cfg,
+                    session_id=self.session_id,
+                    store=artifact_store,
+                    tool_interceptors=[
+                        ToolInterceptor.inject_media_content_before,
+                        ToolInterceptor.save_media_content_after,
+                        ToolInterceptor.inject_tts_config,
+                        ToolInterceptor.inject_bgm_config,
+                        ToolInterceptor.inject_ai_transition_config,
+                        ToolInterceptor.inject_pexels_api_key,
+                    ],
+                    model=codex_model,
+                    reasoning_effort=codex_reasoning_effort,
+                    binary=self.cfg.codex.binary,
+                    cwd=ROOT_DIR,
+                    sandbox=self.cfg.codex.sandbox,
+                    approval_policy=self.cfg.codex.approval_policy,
+                )
+                self._agent_build_key = agent_build_key
+
+            if self.client_context is None:
+                self.client_context = ClientContext(
+                    cfg=self.cfg,
+                    session_id=self.session_id,
+                    media_dir=self.media_dir,
+                    bgm_dir=self.cfg.project.bgm_dir,
+                    outputs_dir=self.cfg.project.outputs_dir,
+                    node_manager=self.node_manager,
+                    chat_model_key=self.chat_model_key,
+                    vlm_model_key=self.vlm_model_key,
+                    tts_config=(self.tts_config or None),
+                    bgm_config=(self.bgm_config or None),
+                    ai_transition_config=(self.ai_transition_config or None),
+                    pexels_api_key=None,
+                    lang=self.lang,
+                )
+            else:
+                self.client_context.chat_model_key = self.chat_model_key
+                self.client_context.vlm_model_key = self.vlm_model_key
+                self.client_context.tts_config = (self.tts_config or None)
+                self.client_context.bgm_config = (self.bgm_config or None)
+                self.client_context.ai_transition_config = (self.ai_transition_config or None)
+                self.client_context.lang = self.lang
+
+            self.client_context.pexels_api_key = (
+                _s(self.pexels_custom_key)
+                if (self.pexels_key_mode or "").lower() == "custom"
+                else _get_default_pexels_api_key(self.cfg)
+            )
+            self.client_context.codex_model = codex_model
+            self.client_context.codex_reasoning_effort = codex_reasoning_effort
+            return
+
         # 1) resolve LLM override
-        if self.chat_model_key == CUSTOM_MODEL_KEY:
+        if self.chat_model_key == CUSTOM_MODEL_KEY or _provider_name_from_model_key(self.chat_model_key):
             if not isinstance(self.custom_llm_config, dict):
-                raise RuntimeError("please fill in model/base_url/api_key of custom LLM")
+                raise RuntimeError("please configure provider/model for custom LLM")
             llm_override = self.custom_llm_config
         else:
             llm_override, err = _resolve_builtin_model_override("llm", self.cfg.llm)
@@ -1940,9 +2236,9 @@ class ChatSession:
                 raise RuntimeError(err)
 
         # 2) resolve VLM override
-        if self.vlm_model_key == CUSTOM_MODEL_KEY:
+        if self.vlm_model_key == CUSTOM_MODEL_KEY or _provider_name_from_model_key(self.vlm_model_key):
             if not isinstance(self.custom_vlm_config, dict):
-                raise RuntimeError("please fill in model/base_url/api_key of custom VLM")
+                raise RuntimeError("please configure provider/model for custom VLM")
             vlm_override = self.custom_vlm_config
         else:
             vlm_override, err = _resolve_builtin_model_override("vlm", self.cfg.vlm)
@@ -1965,6 +2261,7 @@ class ChatSession:
                     ToolInterceptor.inject_media_content_before,
                     ToolInterceptor.save_media_content_after,
                     ToolInterceptor.inject_tts_config,
+                    ToolInterceptor.inject_bgm_config,
                     ToolInterceptor.inject_ai_transition_config,
                     ToolInterceptor.inject_pexels_api_key,
                 ],
@@ -1984,6 +2281,7 @@ class ChatSession:
                 chat_model_key=self.chat_model_key,
                 vlm_model_key=self.vlm_model_key,
                 tts_config=(self.tts_config or None),
+                bgm_config=(self.bgm_config or None),
                 ai_transition_config=(self.ai_transition_config or None),
                 pexels_api_key=None,
                 lang=self.lang,
@@ -1992,6 +2290,7 @@ class ChatSession:
             self.client_context.chat_model_key = self.chat_model_key
             self.client_context.vlm_model_key = self.vlm_model_key
             self.client_context.tts_config = (self.tts_config or None)
+            self.client_context.bgm_config = (self.bgm_config or None)
             self.client_context.ai_transition_config = (self.ai_transition_config or None)
             self.client_context.lang = self.lang
 
@@ -2131,6 +2430,61 @@ class ChatSession:
             metas = [self.load_media[aid] for aid in pick if aid in self.load_media]
             return metas
 
+    @staticmethod
+    def _generated_media_entries_from_summary(summary: Any) -> List[Dict[str, str]]:
+        summary = _normalize_tool_summary_payload(summary)
+
+        if not isinstance(summary, dict):
+            return []
+
+        files = summary.get("generated_files")
+        if not isinstance(files, list):
+            return []
+
+        out: List[Dict[str, str]] = []
+        for item in files:
+            if not isinstance(item, dict):
+                continue
+            path = os.path.abspath(str(item.get("path") or "").strip())
+            if not path or not os.path.isfile(path):
+                continue
+            kind = str(item.get("kind") or detect_media_kind(path)).strip().lower()
+            if kind not in {"image", "video"}:
+                continue
+            out.append({"path": path, "kind": kind})
+        return out
+
+    async def import_generated_media_from_summary(self, summary: Any) -> List[MediaMeta]:
+        entries = self._generated_media_entries_from_summary(summary)
+        if not entries:
+            return []
+
+        display_filenames = [os.path.basename(item["path"]) or f"generated-{idx + 1}" for idx, item in enumerate(entries)]
+        async with self.media_lock:
+            self._check_media_caps_locked(add=len(entries))
+            store_filenames = self._reserve_store_filenames_locked(display_filenames)
+
+        metas: List[MediaMeta] = []
+        for item, store_filename, display_name in zip(entries, store_filenames, display_filenames):
+            metas.append(
+                await self.media_store.copy_from_path(
+                    item["path"],
+                    store_filename=store_filename,
+                    display_name=display_name,
+                )
+            )
+
+        async with self.media_lock:
+            for meta in metas:
+                self.load_media[meta.id] = meta
+                self.pending_media_ids.append(meta.id)
+            self.pending_media_ids.sort(
+                key=lambda aid: os.path.basename(self.load_media[aid].path or "")
+                if aid in self.load_media else ""
+            )
+
+        return metas
+
     # ---- tool trace handling ----
     def _ensure_tool_record(self, tcid: str, server: str, name: str, args: Any) -> Dict[str, Any]:
         idx = self._tool_history_index.get(tcid)
@@ -2193,7 +2547,7 @@ class ChatSession:
         elif et == "tool_end":
             is_error = bool(raw.get("is_error"))
 
-            summary = raw.get("summary")
+            summary = _normalize_tool_summary_payload(raw.get("summary"))
             try:
                 json.dumps(summary, ensure_ascii=False)
             except Exception:
@@ -2281,7 +2635,33 @@ async def lifespan(app: FastAPI):
     app.state.cfg = cfg
     app.state.developer_mode = is_developer_mode(cfg)
     app.state.sessions = SessionStore(cfg)
-    yield
+    app.state.codex_auth_client = CodexAppServerClient(binary=cfg.codex.binary)
+    app.state.local_mcp_manager = LocalMCPServerManager(
+        cwd=ROOT_DIR,
+        host=cfg.local_mcp_server.connect_host,
+        port=cfg.local_mcp_server.port,
+        transport=cfg.local_mcp_server.server_transport,
+    )
+    try:
+        started = await app.state.local_mcp_manager.ensure_started()
+        if not started and app.state.local_mcp_manager.should_manage:
+            logger.warning(
+                "Local MCP server was not ready at startup: %s",
+                app.state.local_mcp_manager.last_error or "unknown error",
+            )
+    except Exception as exc:
+        logger.warning("Failed to auto-start local MCP server: %s", exc, exc_info=exc)
+    try:
+        yield
+    finally:
+        manager = getattr(app.state, "local_mcp_manager", None)
+        close_manager = getattr(manager, "close", None)
+        if callable(close_manager):
+            await close_manager()
+        client = getattr(app.state, "codex_auth_client", None)
+        close = getattr(client, "close", None)
+        if callable(close):
+            await close()
 
 
 app = FastAPI(title="OpenStoryline Web", version="1.0.0", lifespan=lifespan)
@@ -2300,6 +2680,22 @@ if os.path.isdir(NODE_MAP_DIR):
 
 api = APIRouter(prefix="/api")
 
+
+class CodexLoginStartPayload(PydanticModel):
+    flow: str = "device_code"
+
+
+class CodexLoginCancelPayload(PydanticModel):
+    login_id: str
+
+
+def _get_codex_auth_client() -> CodexAppServerClient:
+    client = getattr(app.state, "codex_auth_client", None)
+    if client is None:
+        client = CodexAppServerClient(binary=app.state.cfg.codex.binary)
+        app.state.codex_auth_client = client
+    return client
+
 def _rate_limit_reject_json(retry_after: float) -> JSONResponse:
     ra = int(math.ceil(float(retry_after or 0.0)))
     return JSONResponse(
@@ -2307,6 +2703,31 @@ def _rate_limit_reject_json(retry_after: float) -> JSONResponse:
         status_code=429,
         headers={"Retry-After": str(ra)},
     )
+
+
+@api.get("/meta/local_mcp_status")
+async def get_local_mcp_status():
+    manager = getattr(app.state, "local_mcp_manager", None)
+    if manager is None:
+        return JSONResponse({"status": "missing"})
+    return JSONResponse(manager.snapshot())
+
+
+@api.get("/meta/runtime_health")
+async def get_runtime_health(request: Request):
+    cfg = getattr(app.state, "cfg", None)
+    if cfg is None:
+        raise HTTPException(status_code=503, detail="runtime config unavailable")
+    port = int(request.url.port or 7861)
+    snapshot = await build_runtime_health_snapshot(
+        cfg=cfg,
+        firered_port=port,
+        local_mcp_manager=getattr(app.state, "local_mcp_manager", None),
+        codex_account_reader=getattr(app.state, "codex_auth_client", None).account_read
+        if getattr(app.state, "codex_auth_client", None) is not None
+        else None,
+    )
+    return JSONResponse(snapshot)
 
 async def _enforce_upload_media_count_limit(request: Request, cost: float) -> Optional[JSONResponse]:
     ip = _client_ip_from_http_scope(request.scope, RATE_LIMIT_TRUST_PROXY_HEADERS)
@@ -2361,6 +2782,7 @@ _PROVIDER_UI_LABEL_OVERRIDES = {
     "302": "302.AI",
     "bytedance": "字节跳动 ByteDance",
     "dashscope": "阿里万相 Wan",
+    "localai": "LocalAI",
 }
 
 _PROVIDER_UI_LABEL_OVERRIDES_BY_SECTION = {
@@ -2445,6 +2867,7 @@ def _build_provider_ui_schema_from_config(config_path: str, section_name: str) -
     """
     cfg = _read_config_toml(config_path)
     tts = cfg.get(section_name, {})
+    default_provider = _s(tts.get("default_provider")).lower()
 
     providers_out: list[dict] = []
 
@@ -2482,7 +2905,15 @@ def _build_provider_ui_schema_from_config(config_path: str, section_name: str) -
                 "fields": normalized_fields,
             })
 
-    return {"providers": providers_out}
+    if not default_provider:
+        provider_names = {str(item.get("provider") or "").strip().lower() for item in providers_out}
+        if section_name in {"generate_voiceover", "select_bgm"} and "localai" in provider_names:
+            default_provider = "localai"
+
+    return {
+        "default_provider": default_provider,
+        "providers": providers_out,
+    }
 
 @app.get("/")
 async def index():
@@ -2505,10 +2936,112 @@ async def get_tts_ui_schema():
     schema = _build_provider_ui_schema_from_config(default_config_path(), "generate_voiceover")
     return JSONResponse(schema)
 
+@api.get("/meta/bgm")
+async def get_bgm_ui_schema():
+    schema = _build_provider_ui_schema_from_config(default_config_path(), "select_bgm")
+    return JSONResponse(schema)
+
 @api.get("/meta/ai_transition")
 async def get_ai_transition_ui_schema():
     schema = _build_provider_ui_schema_from_config(default_config_path(), "generate_ai_transition")
     return JSONResponse(schema)
+
+@api.get("/meta/model_providers")
+async def get_model_provider_ui_schema():
+    schema = build_model_provider_ui_schema()
+    codex_models = list(getattr(app.state.cfg.codex, "available_models", []) or [])
+    default_codex_model = str(getattr(app.state.cfg.codex, "default_model", "") or "").strip()
+    default_codex_reasoning_effort = str(getattr(app.state.cfg.codex, "default_reasoning_effort", "") or "").strip()
+    for kind in ("llm", "vlm"):
+        for provider in schema.get(kind, {}).get("providers", []):
+            if str(provider.get("provider") or "") != "codex":
+                continue
+            if codex_models:
+                provider["models"] = codex_models
+            if default_codex_model:
+                provider["model"] = default_codex_model
+            if default_codex_reasoning_effort:
+                provider["default_reasoning_effort"] = default_codex_reasoning_effort
+    return JSONResponse(schema)
+
+
+@api.get("/codex/account")
+async def get_codex_account():
+    try:
+        raw = await _get_codex_auth_client().account_read()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"codex account unavailable: {e}") from e
+    return JSONResponse(normalize_codex_account_response(raw))
+
+
+@api.post("/codex/login/start")
+async def start_codex_login(payload: CodexLoginStartPayload):
+    flow = str(payload.flow or "").strip().lower()
+    try:
+        raw = await _get_codex_auth_client().account_login_start(flow)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"codex login unavailable: {e}") from e
+    return JSONResponse(normalize_codex_login_response(raw))
+
+
+@api.post("/codex/login/cancel")
+async def cancel_codex_login(payload: CodexLoginCancelPayload):
+    try:
+        raw = await _get_codex_auth_client().account_login_cancel(payload.login_id)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"codex login cancel unavailable: {e}") from e
+    return JSONResponse(raw if isinstance(raw, dict) else {"ok": True})
+
+
+@api.post("/codex/logout")
+async def logout_codex():
+    try:
+        raw = await _get_codex_auth_client().account_logout()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"codex logout unavailable: {e}") from e
+    return JSONResponse(raw if isinstance(raw, dict) else {"ok": True})
+
+
+@api.get("/codex/rate_limits")
+async def get_codex_rate_limits():
+    try:
+        raw = await _get_codex_auth_client().account_rate_limits_read()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"codex rate limits unavailable: {e}") from e
+    return JSONResponse(normalize_codex_rate_limits_response(raw))
+
+
+@api.get("/codex/models")
+async def get_codex_models():
+    try:
+        raw = await _get_codex_auth_client().model_list()
+        normalized = normalize_codex_model_list_response(raw)
+    except Exception:
+        normalized = {"models": [], "next_cursor": None}
+
+    if not normalized["models"]:
+        fallback_models = list(getattr(app.state.cfg.codex, "available_models", []) or [])
+        default_model = str(getattr(app.state.cfg.codex, "default_model", "") or "").strip()
+        default_reasoning_effort = str(getattr(app.state.cfg.codex, "default_reasoning_effort", "") or "").strip() or "medium"
+        reasoning_effort_options = ["none", "minimal", "low", "medium", "high", "xhigh"]
+        normalized["models"] = [
+            {
+                "id": model_name,
+                "model": model_name,
+                "display_name": model_name,
+                "description": "",
+                "is_default": model_name == default_model,
+                "input_modalities": ["text", "image"],
+                "reasoning_effort_options": reasoning_effort_options,
+                "default_reasoning_effort": default_reasoning_effort,
+                "additional_speed_tiers": [],
+            }
+            for model_name in fallback_models
+        ]
+
+    return JSONResponse(normalized)
 
 # -------------------------
 # Sessions (REST)
@@ -3164,6 +3697,8 @@ async def ws_chat(ws: WebSocket, session_id: str):
                         # 1) 从 pending 里拿本次要发送的附件
                         attachments = await sess.take_pending_media_for_message(attachment_ids)
                         attachments_public = [sess.public_media(m) for m in attachments]
+                        if sess.client_context is not None:
+                            sess.client_context.codex_turn_attachments = list(attachments)
 
                         # 统计本轮和累计发送了几个素材
                         turn_attached_count = len(attachments)
@@ -3628,12 +4163,15 @@ async def ws_chat(ws: WebSocket, session_id: str):
                                                     "message": rec["message"],
                                                 })
                                             elif raw["type"] == "tool_end":
+                                                imported_generated = await sess.import_generated_media_from_summary(rec["summary"])
+                                                pending_media = sess.public_pending_media() if imported_generated else None
                                                 await emit_turn_event("tool.end", {
                                                     "tool_call_id": rec["tool_call_id"],
                                                     "server": rec["server"],
                                                     "name": rec["name"],
                                                     "is_error": rec["state"] == "error",
                                                     "summary": rec["summary"],
+                                                    "pending_media": pending_media,
                                                 })
                                         continue
 

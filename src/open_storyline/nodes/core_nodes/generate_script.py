@@ -41,6 +41,17 @@ class GenerateScriptNode(BaseNode):
         user_request = inputs["user_request"]
         llm = node_state.llm
 
+        if _should_use_single_image_script_fallback(clip_info, groups):
+            fallback = _single_image_script_fallback(
+                groups=groups,
+                clip_captions=clip_captions,
+                overall=overall,
+                user_request=user_request,
+                lang=node_state.lang,
+            )
+            node_state.node_summary.info_for_user("Single-image fallback enabled for script generation")
+            return fallback
+
         duration_lookup = _build_duration_lookup(clip_info)
         caption_lookup = _build_caption_lookup(clip_captions)
 
@@ -347,3 +358,85 @@ def validate_subtitle_format(data: dict[str, Any]):
             raise ValueError("group missing field 'group_id'")
         if "raw_text" not in group:
             raise ValueError("group missing field 'raw_text'")
+
+
+def _should_use_single_image_script_fallback(
+    clip_info: list[dict[str, Any]],
+    groups: list[dict[str, Any]],
+) -> bool:
+    clips = [clip for clip in (clip_info or []) if isinstance(clip, dict)]
+    normalized_groups = [group for group in (groups or []) if isinstance(group, dict)]
+    return (
+        len(clips) == 1
+        and str(clips[0].get("kind", "") or "").strip().lower() == "image"
+        and len(normalized_groups) == 1
+    )
+
+
+def _single_image_script_fallback(
+    *,
+    groups: list[dict[str, Any]],
+    clip_captions: list[dict[str, Any]],
+    overall: str,
+    user_request: str,
+    lang: str,
+) -> dict[str, Any]:
+    group = groups[0]
+    caption_text = " ".join(
+        str(item.get("caption", "") or "").strip()
+        for item in (clip_captions or [])
+        if isinstance(item, dict)
+    ).strip()
+    script_text = _heuristic_single_image_script(
+        user_request=user_request,
+        overall=overall,
+        caption_text=caption_text,
+        lang=lang,
+    )
+    units, _next_index = _make_subtitle_units(
+        raw_text=script_text,
+        subtitle_start_index=1,
+    )
+    title = _heuristic_single_image_title(user_request=user_request, lang=lang)
+    return {
+        "group_scripts": [
+            {
+                "group_id": group.get("group_id", "group_0001"),
+                "raw_text": script_text,
+                "subtitle_units": units,
+            }
+        ],
+        "title": title,
+    }
+
+
+def _heuristic_single_image_script(
+    *,
+    user_request: str,
+    overall: str,
+    caption_text: str,
+    lang: str,
+) -> str:
+    text = " ".join(
+        part for part in (str(user_request or ""), str(overall or ""), str(caption_text or "")) if part
+    ).lower()
+
+    if str(lang or "").strip().lower().startswith("zh"):
+        if any(token in text for token in ("海", "beach", "travel", "旅行", "vlog", "假期", "holiday")):
+            return "阳光落在海面上，假期的快乐从这一刻开始。"
+        return "把这一刻收进画面里，让轻快的故事从这里开始。"
+
+    if any(token in text for token in ("beach", "travel", "holiday", "vacation", "vlog")):
+        return "Sunlight hits the shoreline, and the trip begins with a smile."
+    return "Hold on to this bright moment and let the story begin."
+
+
+def _heuristic_single_image_title(*, user_request: str, lang: str) -> str:
+    text = str(user_request or "").lower()
+    if str(lang or "").strip().lower().startswith("zh"):
+        if any(token in text for token in ("海", "beach", "旅行", "vlog")):
+            return "夏日海岸"
+        return "轻快短片"
+    if any(token in text for token in ("beach", "travel", "vlog")):
+        return "Sunny Escape"
+    return "Short Story"

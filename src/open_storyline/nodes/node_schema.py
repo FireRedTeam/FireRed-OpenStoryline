@@ -327,7 +327,7 @@ class SelectBGMInput(BaseInput):
     )
     user_request: Annotated[str, Field(default="", description="User's requirements for background music.")]
     filter_include: Annotated[
-        Dict[str, List[Union[str, int]]],
+        Union[Dict[str, List[Union[str, int]]], List[Union[str, int]]],
         Field(
             description=(
                 "Positive filter conditions. Multiple dimensions are combined with AND, "
@@ -345,7 +345,7 @@ class SelectBGMInput(BaseInput):
         )
     ] = {}
     filter_exclude: Annotated[
-        Dict[str, List[Union[str, int]]],
+        Union[Dict[str, List[Union[str, int]]], List[Union[str, int]]],
         Field(
             description=(
                 "Negative filter conditions. Items matching these conditions will be excluded. "
