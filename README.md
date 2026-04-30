@@ -186,7 +186,8 @@ conda activate storyline
 ### 3. 📦 Resource Download & Installation
 #### 3.1 Automatic Installation (Linux and macOS only)
 ```
-sh build_env.sh
+chmod +x build_env.sh
+./build_env.sh
 ```
 #### 3.2 Manual Installation
 ##### A. MacOS or Linux
