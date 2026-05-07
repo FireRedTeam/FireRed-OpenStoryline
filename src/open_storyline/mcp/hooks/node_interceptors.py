@@ -22,6 +22,7 @@ logger = get_logger(__name__)
 
 # Hosts that indicate Agent and MCP server are on the same machine (path-only, no base64). 0.0.0.0 for Docker.
 _LOCAL_CONNECT_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "0.0.0.0"})
+_AUDIO_EXTS = {".mp3", ".wav", ".m4a"}
 
 
 def should_inline_media_as_base64(server_cfg=None) -> bool:
@@ -315,6 +316,11 @@ class ToolInterceptor:
                     # Collect dependencies again
                     collect_result = meta_collector.check_excutable(session_id, store, require_kind)
                     load_collected_data(collect_result['collected_node'], input_data, store)
+                if node_id == 'voice_clone_minimax' and not request.args.get('clone_audio'):
+                    audio_files = [str(p.resolve()) for p in Path(context.media_dir).iterdir() if p.is_file() and p.suffix.lower() in _AUDIO_EXTS]
+                    if audio_files:
+                        input_data['clone_audio'] = audio_files[0]
+                        logger.info(f'[voice_clone_minimax] Auto-injected clone_audio: {audio_files[0]}')
             else:
                 input_data['artifacts_dir'] = store.artifacts_dir
 
@@ -441,10 +447,13 @@ class ToolInterceptor:
         Interceptor: Injects runtime.context.tts_config parameters into request.args before invoking voiceover/TTS tools.
         - tts_config: {"provider": "bytedance", "bytedance": {...}, "azure": {...}, ...}
         """
+        tool_name = str(getattr(request, 'name', '') or '')
+        if not any(kw in tool_name for kw in ('voiceover', 'voice_clone_minimax')):
+            return await handler(request)
         return await ToolInterceptor._inject_provider_config(
             request,
             handler,
-            tool_name_keyword="voiceover",
+            tool_name_keyword="",  # already filtered above
             context_attr="tts_config",
             default_provider="minimax",
         )

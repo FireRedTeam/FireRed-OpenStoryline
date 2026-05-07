@@ -178,6 +178,60 @@ class BaseInput(BaseModel):
     )
 
 
+class VoiceCloneMinimaxInput(BaseInput):
+    mode: Literal["auto", "skip", "default"] = Field(
+        default="auto",
+        description=(
+            "auto: Clone voice then generate voiceover for all script groups using the cloned voice; "
+            "skip/default: Skip cloning and return empty voiceover list."
+        ),
+    )
+    clone_audio: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description=(
+            "Audio file to clone. Pass exactly one item. "
+            'Local mode: [{"path": "/abs/path/audio.mp3"}]. '
+            'Remote/web mode: [{"path": "filename.mp3", "base64": "<b64>", "md5": "<md5>"}]. '
+            "Supported formats: mp3, m4a, wav. Duration: 10s-5min. Max size: 20MB."
+        ),
+    )
+    voice_id: str = Field(
+        default="",
+        description=(
+            "Custom voice_id to assign to the cloned voice (e.g. 'my_cloned_voice_001'). "
+            "Must be unique within your MiniMax account. "
+            "If empty, a unique id will be auto-generated."
+        ),
+    )
+    prompt_audio: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description=(
+            "Optional reference audio to improve clone quality. Pass at most one item, same format as clone_audio. "
+            "Duration < 8s. Max size: 20MB. Leave empty to skip."
+        ),
+    )
+    prompt_text: str = Field(
+        default="",
+        description=(
+            "Optional: transcript text matching prompt_audio, used together with prompt_audio "
+            "to guide the cloning. Leave empty if no prompt audio is provided."
+        ),
+    )
+    model: str = Field(
+        default="speech-02-hd",
+        description="MiniMax TTS model for voiceover generation. Options: speech-02-hd, speech-02-turbo, speech-2.6-hd.",
+    )
+    speed: float = Field(
+        default=1.0,
+        description="Speech speed multiplier, range 0.5-2.0.",
+    )
+    user_request: str = Field(
+        default="",
+        description="User's additional requirements for the voiceover style or delivery.",
+    )
+
+
+
 class LoadMediaInput(BaseInput):
     ...
 
@@ -318,6 +372,8 @@ class RecommendScriptTemplateInput(BaseInput):
 
 class GenerateVoiceoverOutput(BaseModel):
     voiceover: List[Voiceover] = Field(default_factory=list, description="Voiceover list")
+
+VoiceCloneMinimaxOutput = GenerateVoiceoverOutput
 
 
 class SelectBGMInput(BaseInput):

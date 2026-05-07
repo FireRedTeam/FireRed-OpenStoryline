@@ -115,9 +115,9 @@ const __OS_I18N = {
     "toast.switch_while_streaming": "正在生成回复，暂时无法切换会话。请先等待完成或打断当前回复。",
     "toast.session_restore_unavailable": "暂时无法从服务器恢复会话（网络或服务繁忙）。请稍后刷新或重试；本地会话 ID 已保留。",
     "toast.uploading_interrupt_send": "素材正在上传中，暂时无法发送新消息。已为你打断当前回复；上传完成后再按 Enter 发送。",
-    "toast.media_all_filtered": "仅支持上传视频或图片文件。",
-    "toast.media_partial_filtered": "已过滤 {n} 个不支持的文件类型，仅上传视频/图片。",
-    "toast.audio_not_supported": "暂不支持音频文件上传（后端尚未支持音频处理）。",
+    "toast.media_all_filtered": "仅支持上传视频、图片或音频文件。",
+    "toast.media_partial_filtered": "已过滤 {n} 个不支持的文件类型，仅上传视频/图片/音频。",
+    "toast.audio_not_supported": "暂不支持该音频格式，请上传 mp3、wav 或 m4a 文件。",
 
     // tools
     "tool.card.default_name": "工具调用",
@@ -239,9 +239,9 @@ const __OS_I18N = {
     "toast.switch_while_streaming": "A reply is still being generated. Please wait or interrupt before switching chats.",
     "toast.session_restore_unavailable": "Could not restore the session from the server (network or temporary overload). Please retry later or refresh. Your local session id is kept.",
     "toast.uploading_interrupt_send": "Media is uploading, so a new message can't be sent yet. I interrupted the current reply; press Enter after the upload finishes.",
-    "toast.media_all_filtered": "Only video or image files are supported.",
-    "toast.media_partial_filtered": "{n} unsupported file(s) were filtered; only video/image files will be uploaded.",
-    "toast.audio_not_supported": "Audio uploads are not supported yet (backend audio processing is not available).",
+    "toast.media_all_filtered": "Only video, image, or audio files are supported.",
+    "toast.media_partial_filtered": "{n} unsupported file(s) were filtered; only video/image/audio files will be uploaded.",
+    "toast.audio_not_supported": "This audio format is not supported. Please upload mp3, wav, or m4a files.",
     
     // tools
     "tool.card.default_name": "Tool call",
@@ -3873,35 +3873,49 @@ class App {
     let files = Array.isArray(rawFiles) ? rawFiles.slice() : Array.from(rawFiles || []);
     if (!files.length) return;
 
-    const isAudioFile = (f) => {
+    // 支持的音频后缀（用于 voice_clone_minimax 等节点）
+    const isSupportedAudioFile = (f) => {
       if (!f) return false;
       const type = String(f.type || "").toLowerCase();
-      if (type.startsWith("audio/")) return true;
+      if (type.startsWith("audio/")) {
+        // 仅放行常见格式，屏蔽小众格式（aac/flac/ogg/opus 后端暂不处理）
+        return /audio\/(mpeg|mp3|wav|x-wav|m4a|x-m4a|mp4)/.test(type);
+      }
       const name = String(f.name || "").toLowerCase();
-      return /\.(mp3|wav|m4a|aac|flac|ogg|opus)$/.test(name);
+      return /\.(mp3|wav|m4a)$/.test(name);
     };
 
-    // 仅允许视频/图片（音频暂不支持：后端没有处理逻辑）
+    // 不支持的音频格式（给出专门提示）
+    const isUnsupportedAudioFile = (f) => {
+      if (!f) return false;
+      const type = String(f.type || "").toLowerCase();
+      if (type.startsWith("audio/") && !isSupportedAudioFile(f)) return true;
+      const name = String(f.name || "").toLowerCase();
+      return /\.(aac|flac|ogg|opus)$/.test(name);
+    };
+
+    // 仅允许视频/图片/支持的音频格式
     const isSupportedMediaFile = (f) => {
       if (!f) return false;
       const type = String(f.type || "").toLowerCase();
       if (type.startsWith("video/") || type.startsWith("image/")) {
         return true;
       }
+      if (isSupportedAudioFile(f)) return true;
       // 对部分没有正确 MIME 的文件，fallback 到后缀判断
       const name = String(f.name || "").toLowerCase();
       return /\.(mp4|mov|m4v|avi|mkv|webm|flv|wmv|jpg|jpeg|png|gif|webp|bmp|tiff)$/.test(name);
     };
 
     const beforeCount = files.length;
-    const audioCount = files.filter(isAudioFile).length;
-    files = files.filter((f) => isSupportedMediaFile(f) && !isAudioFile(f));
+    const unsupportedAudioCount = files.filter(isUnsupportedAudioFile).length;
+    files = files.filter(isSupportedMediaFile);
     const filteredCount = beforeCount - files.length;
 
     if (!files.length) {
       // 全部被过滤，直接提示并返回
       try {
-        if (audioCount > 0) {
+        if (unsupportedAudioCount > 0) {
           this.ui.showToastI18n("toast.audio_not_supported", {});
         } else {
           this.ui.showToastI18n("toast.media_all_filtered", {});

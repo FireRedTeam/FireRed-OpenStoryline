@@ -309,6 +309,8 @@ def detect_media_kind(filename: str) -> str:
         return "image"
     if ext in {".mp4", ".mov", ".avi", ".mkv", ".webm"}:
         return "video"
+    if ext in {".mp3", ".wav", ".m4a"}:
+        return "audio"
     return "unknown"
 
 
@@ -3243,6 +3245,20 @@ async def ws_chat(ws: WebSocket, session_id: str):
                         _merged_messages: List[BaseMessage] = (
                             [SystemMessage(content="\n\n".join(_system_parts))] if _system_parts else []
                         ) + _non_system
+
+                        # Strip reasoning_content from AIMessage history before sending to LLM.
+                        # Some providers (e.g. domestic OpenAI-compatible APIs in thinking mode)
+                        # return reasoning_content in additional_kwargs but do not accept it back,
+                        # causing a 400 error on subsequent turns.
+                        for _m in _merged_messages:
+                            if (
+                                isinstance(_m, AIMessage)
+                                and "reasoning_content" in _m.additional_kwargs
+                            ):
+                                _m.additional_kwargs = {
+                                    k: v for k, v in _m.additional_kwargs.items()
+                                    if k != "reasoning_content"
+                                }
 
                         async def pump_agent():
                             nonlocal new_messages
