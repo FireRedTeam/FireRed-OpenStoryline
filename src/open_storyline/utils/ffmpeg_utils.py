@@ -20,7 +20,7 @@ FFMPEG_STDOUT_PIPE = "pipe:1"
 
 FFMPEG_ENVIRONMENT_VARIABLE_KEYS = ("IMAGEIO_FFMPEG_EXE", "FFMPEG_BINARY")
 
-SAFE_MAP_ARGS = ["-map", "0:v:0", "-map", "0:a?", "-dn", "-sn"]
+SAFE_MAP_ARGS = ["-map", "0:v:0", "-map", "0:a:0?", "-dn", "-sn"]
 
 CLIP_ID_NUMBER_WIDTH = 4
 
