@@ -233,7 +233,7 @@ def build_media_id_to_path_map(load_media: Dict[str, Any]) -> Dict[str, str]:
 
 def is_image_file(path: str) -> bool:
     try:
-        return Path(path).suffix.lower() in {".png", ".jpg", ".jpeg", ".bmp", ".webp", ".tif", ".tiff"}
+        return Path(path).suffix.lower() in {".png", ".jpg", ".jpeg", ".bmp", ".webp", ".tif", ".tiff", ".heic", ".heif"}
     except Exception:
         return False
 

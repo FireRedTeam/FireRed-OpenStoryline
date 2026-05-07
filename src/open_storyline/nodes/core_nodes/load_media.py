@@ -17,7 +17,7 @@ VIDEO_EXTS = {
     ".mp4", ".mov", ".mkv", ".avi"
 }
 IMAGE_EXTS = {
-    ".jpg", ".jpeg", ".png", ".webp", ".bmp"
+    ".jpg", ".jpeg", ".png", ".webp", ".bmp", ".heic", ".heif"
 }
 
 def _image_metadata_from_path(path: Path) -> dict[str, Any]:
