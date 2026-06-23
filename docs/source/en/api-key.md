@@ -1,5 +1,59 @@
 # API Key Configuration Guide
 
+## 0. Atlas Cloud — One Key for Both LLM & VLM (OpenAI-compatible, recommended)
+
+FireRed-OpenStoryline talks to its `[llm]` and `[vlm]` backends through a standard
+OpenAI-compatible `chat/completions` endpoint. [Atlas Cloud](https://www.atlascloud.ai/?utm_source=github&utm_medium=link&utm_campaign=FireRed-OpenStoryline)
+exposes exactly that interface, so a **single `base_url` + API key** can serve both the
+text LLM (script planning / scheduling) and the multimodal VLM (clip understanding) — no
+separate vendor accounts.
+
+1. **Get an API Key**: sign in at [atlascloud.ai](https://www.atlascloud.ai/?utm_source=github&utm_medium=link&utm_campaign=FireRed-OpenStoryline)
+   and create a key. Keep it secret.
+2. **Configuration parameters**
+   - **Base URL**: `https://api.atlascloud.ai/v1`
+   - **LLM model**: `deepseek-ai/deepseek-v4-pro` (a reasoning model — keep `max_tokens` large enough, e.g. ≥ 512)
+   - **VLM model**: `qwen/qwen3-vl-30b-a3b-instruct` (or `qwen/qwen3-vl-8b-instruct` for a lighter option)
+   - **API Key**: the key from step 1
+3. **Fill it into `config.toml`** (same place as any other OpenAI-compatible provider):
+
+   ```toml
+   [llm]
+   model = "deepseek-ai/deepseek-v4-pro"
+   base_url = "https://api.atlascloud.ai/v1"
+   api_key = ""   # your Atlas Cloud key
+
+   [vlm]
+   model = "qwen/qwen3-vl-30b-a3b-instruct"
+   base_url = "https://api.atlascloud.ai/v1"
+   api_key = ""   # the same Atlas Cloud key works here too
+   ```
+
+   On the Web UI you can instead pick **Custom Model** in the LLM / VLM dropdown and paste
+   the same `model` / `base_url` / `api_key`.
+
+Atlas Cloud is a full-modal, OpenAI-compatible inference platform: beyond the two models
+above it also serves GLM, Kimi, MiniMax, Claude, Gemini and more behind the same endpoint,
+plus image / video generation APIs you can reuse for the AI-transition step. Browse the
+full catalog at [atlascloud.ai/models](https://www.atlascloud.ai/models).
+
+<details>
+<summary>All Atlas Cloud chat models (59)</summary>
+
+- Anthropic (Claude): `anthropic/claude-haiku-4.5-20251001`, `anthropic/claude-opus-4.8`, `anthropic/claude-sonnet-4.6`
+- OpenAI (GPT): `openai/gpt-5.4`, `openai/gpt-5.5`
+- Google (Gemini): `google/gemini-3.1-flash-lite`, `google/gemini-3.1-pro-preview`, `google/gemini-3.5-flash`
+- Alibaba (Qwen): `qwen/qwen2.5-7b-instruct`, `Qwen/Qwen3-235B-A22B-Instruct-2507`, `qwen/qwen3-235b-a22b-thinking-2507`, `qwen/qwen3-30b-a3b`, `Qwen/Qwen3-30B-A3B-Instruct-2507`, `qwen/qwen3-30b-a3b-thinking-2507`, `qwen/qwen3-32b`, `qwen/qwen3-8b`, `Qwen/Qwen3-Coder`, `qwen/qwen3-coder-next`, `qwen/qwen3-max-2026-01-23`, `Qwen/Qwen3-Next-80B-A3B-Instruct`, `Qwen/Qwen3-Next-80B-A3B-Thinking`, `Qwen/Qwen3-VL-235B-A22B-Instruct`, `qwen/qwen3-vl-235b-a22b-thinking`, `qwen/qwen3-vl-30b-a3b-instruct`, `qwen/qwen3-vl-30b-a3b-thinking`, `qwen/qwen3-vl-8b-instruct`, `qwen/qwen3.5-122b-a10b`, `qwen/qwen3.5-27b`, `qwen/qwen3.5-35b-a3b`, `qwen/qwen3.5-397b-a17b`, `qwen/qwen3.6-35b-a3b`, `qwen/qwen3.6-plus`
+- DeepSeek: `deepseek-ai/deepseek-ocr`, `deepseek-ai/deepseek-r1-0528`, `deepseek-ai/DeepSeek-V3-0324`, `deepseek-ai/DeepSeek-V3.1`, `deepseek-ai/DeepSeek-V3.1-Terminus`, `deepseek-ai/deepseek-v3.2`, `deepseek-ai/DeepSeek-V3.2-Exp`, `deepseek-ai/deepseek-v4-flash`, `deepseek-ai/deepseek-v4-pro`
+- Moonshot (Kimi): `moonshotai/Kimi-K2-Instruct`, `moonshotai/Kimi-K2-Instruct-0905`, `moonshotai/Kimi-K2-Thinking`, `moonshotai/kimi-k2.5`, `moonshotai/kimi-k2.6`
+- Zhipu (GLM): `zai-org/GLM-4.6`, `zai-org/glm-4.7`, `zai-org/glm-5`, `zai-org/glm-5-turbo`, `zai-org/glm-5.1`, `zai-org/glm-5v-turbo`
+- MiniMax: `MiniMaxAI/MiniMax-M2`, `minimaxai/minimax-m2.1`, `minimaxai/minimax-m2.5`, `minimaxai/minimax-m2.7`
+- xAI (Grok): `xai/grok-4.3`
+- Kuaishou (KAT): `kwaipilot/kat-coder-pro-v2`
+- Other: `owl`
+
+</details>
+
 ## 1. Large Language Model (LLM)
 
 ### Using DeepSeek as an Example

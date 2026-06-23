@@ -40,6 +40,14 @@
   <video src="https://github.com/user-attachments/assets/9116767e-bcd9-417a-93d8-2db4d3d5df8e" width="70%" poster=""> </video>
 </div>
 
+<p align="center">
+  <a href="https://www.atlascloud.ai/?utm_source=github&utm_medium=link&utm_campaign=FireRed-OpenStoryline">
+    <img src="./assets/atlas-cloud-logo.png" alt="Atlas Cloud" width="180">
+  </a>
+</p>
+
+> 🎁 **[Atlas Cloud](https://www.atlascloud.ai/?utm_source=github&utm_medium=link&utm_campaign=FireRed-OpenStoryline)** 为 FireRed-OpenStoryline 的 **LLM**（文案规划、调度）与 **VLM**（画面理解）两个环节提供同一个 OpenAI 兼容入口——在 `config.toml` 里把 `[llm]` 和 `[vlm]` 指向同一个 `base_url` + Key，即可调用 DeepSeek、Qwen3-VL、GLM、Kimi、MiniMax 等模型，无需逐家厂商分别配置。详见 [API-Key 配置](docs/source/zh/api-key.md)。
+> 高性价比：[coding plan](https://www.atlascloud.ai/console/coding-plan) · [模型列表](https://www.atlascloud.ai/models)
 
 **FireRed-OpenStoryline** 将复杂的视频创作转化为自然直观的对话体验。兼顾易用性和企业级可靠性，让视频创作对初学者和创意爱好者都变得简单友好。
 > FireRed，字面意思红色的火苗，取自“星星之火，可以燎原”。我们将这团火苗取名为 FireRed，就是希望将我们在真实场景中打磨出的 SOTA 能力，像火种一样撒向旷野，点燃全球开发者的想象力，共同改变这个 AI 的世界。

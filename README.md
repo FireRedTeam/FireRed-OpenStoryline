@@ -40,6 +40,15 @@
   <video src="https://github.com/user-attachments/assets/9116767e-bcd9-417a-93d8-2db4d3d5df8e" width="70%" poster=""> </video>
 </div>
 
+<p align="center">
+  <a href="https://www.atlascloud.ai/?utm_source=github&utm_medium=link&utm_campaign=FireRed-OpenStoryline">
+    <img src="./assets/atlas-cloud-logo.png" alt="Atlas Cloud" width="180">
+  </a>
+</p>
+
+> 🎁 **[Atlas Cloud](https://www.atlascloud.ai/?utm_source=github&utm_medium=link&utm_campaign=FireRed-OpenStoryline)** gives FireRed-OpenStoryline a single OpenAI-compatible endpoint for both its **LLM** (script planning, scheduling) and **VLM** (clip understanding) stages — point `[llm]` and `[vlm]` in `config.toml` at one `base_url` + key to reach DeepSeek, Qwen3-VL, GLM, Kimi, MiniMax and more, no per-vendor setup. See [API-Key Configuration](docs/source/en/api-key.md).
+> Budget-friendly: [coding plan](https://www.atlascloud.ai/console/coding-plan) · [models](https://www.atlascloud.ai/models)
+
 **FireRed-OpenStoryline** turns complex video creation into natural, intuitive conversations. Designed with both accessibility and enterprise-grade reliability in mind, FireRed-OpenStoryline makes video creation easy and friendly to beginners and creative enthusiasts alike.
 > Deriving from the saying "A single spark can start a prairie fire", the name FireRed represents our vision: to spread our SOTA capabilities—honed in real-world scenarios—like sparks across the wilderness, igniting the imagination of developers worldwide to reshape the future of AI together.
 
