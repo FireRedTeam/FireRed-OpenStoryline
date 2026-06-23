@@ -1,5 +1,56 @@
 # API-Key 配置指南
 
+## 〇、Atlas Cloud —— 一个 Key 同时供 LLM 与 VLM（OpenAI 兼容，推荐）
+
+FireRed-OpenStoryline 通过标准的 OpenAI 兼容 `chat/completions` 接口访问 `[llm]` 和 `[vlm]` 后端。
+[Atlas Cloud](https://www.atlascloud.ai/?utm_source=github&utm_medium=link&utm_campaign=FireRed-OpenStoryline)
+正好提供这套接口，因此**一个 `base_url` + 一个 API Key** 即可同时服务文本 LLM（文案规划 / 调度）
+和多模态 VLM（画面理解），无需分别注册多家厂商。
+
+1. **获取 API Key**：在 [atlascloud.ai](https://www.atlascloud.ai/?utm_source=github&utm_medium=link&utm_campaign=FireRed-OpenStoryline)
+   登录并创建 Key，请妥善保管。
+2. **配置参数**
+   - **Base URL**：`https://api.atlascloud.ai/v1`
+   - **LLM 模型**：`deepseek-ai/deepseek-v4-pro`（推理模型，`max_tokens` 要给足，建议 ≥ 512）
+   - **VLM 模型**：`qwen/qwen3-vl-30b-a3b-instruct`（更轻量可用 `qwen/qwen3-vl-8b-instruct`）
+   - **API Key**：第 1 步获取的 Key
+3. **填入 `config.toml`**（和任何其他 OpenAI 兼容平台放在同一处）：
+
+   ```toml
+   [llm]
+   model = "deepseek-ai/deepseek-v4-pro"
+   base_url = "https://api.atlascloud.ai/v1"
+   api_key = ""   # 你的 Atlas Cloud Key
+
+   [vlm]
+   model = "qwen/qwen3-vl-30b-a3b-instruct"
+   base_url = "https://api.atlascloud.ai/v1"
+   api_key = ""   # 同一个 Atlas Cloud Key 即可
+   ```
+
+   在 Web 界面中，也可以在 LLM / VLM 下拉框选择 **自定义模型**，填入相同的 `model` / `base_url` / `api_key`。
+
+Atlas Cloud 是一个全模态、OpenAI 兼容的推理平台：除上述两个模型外，同一接口下还提供 GLM、Kimi、
+MiniMax、Claude、Gemini 等模型，以及可用于 AI 转场环节的图像 / 视频生成 API。完整模型目录见
+[atlascloud.ai/models](https://www.atlascloud.ai/models)。
+
+<details>
+<summary>Atlas Cloud 全部对话模型（59 个）</summary>
+
+- Anthropic (Claude): `anthropic/claude-haiku-4.5-20251001`, `anthropic/claude-opus-4.8`, `anthropic/claude-sonnet-4.6`
+- OpenAI (GPT): `openai/gpt-5.4`, `openai/gpt-5.5`
+- Google (Gemini): `google/gemini-3.1-flash-lite`, `google/gemini-3.1-pro-preview`, `google/gemini-3.5-flash`
+- 阿里 Qwen: `qwen/qwen2.5-7b-instruct`, `Qwen/Qwen3-235B-A22B-Instruct-2507`, `qwen/qwen3-235b-a22b-thinking-2507`, `qwen/qwen3-30b-a3b`, `Qwen/Qwen3-30B-A3B-Instruct-2507`, `qwen/qwen3-30b-a3b-thinking-2507`, `qwen/qwen3-32b`, `qwen/qwen3-8b`, `Qwen/Qwen3-Coder`, `qwen/qwen3-coder-next`, `qwen/qwen3-max-2026-01-23`, `Qwen/Qwen3-Next-80B-A3B-Instruct`, `Qwen/Qwen3-Next-80B-A3B-Thinking`, `Qwen/Qwen3-VL-235B-A22B-Instruct`, `qwen/qwen3-vl-235b-a22b-thinking`, `qwen/qwen3-vl-30b-a3b-instruct`, `qwen/qwen3-vl-30b-a3b-thinking`, `qwen/qwen3-vl-8b-instruct`, `qwen/qwen3.5-122b-a10b`, `qwen/qwen3.5-27b`, `qwen/qwen3.5-35b-a3b`, `qwen/qwen3.5-397b-a17b`, `qwen/qwen3.6-35b-a3b`, `qwen/qwen3.6-plus`
+- DeepSeek: `deepseek-ai/deepseek-ocr`, `deepseek-ai/deepseek-r1-0528`, `deepseek-ai/DeepSeek-V3-0324`, `deepseek-ai/DeepSeek-V3.1`, `deepseek-ai/DeepSeek-V3.1-Terminus`, `deepseek-ai/deepseek-v3.2`, `deepseek-ai/DeepSeek-V3.2-Exp`, `deepseek-ai/deepseek-v4-flash`, `deepseek-ai/deepseek-v4-pro`
+- Moonshot (Kimi): `moonshotai/Kimi-K2-Instruct`, `moonshotai/Kimi-K2-Instruct-0905`, `moonshotai/Kimi-K2-Thinking`, `moonshotai/kimi-k2.5`, `moonshotai/kimi-k2.6`
+- 智谱 GLM: `zai-org/GLM-4.6`, `zai-org/glm-4.7`, `zai-org/glm-5`, `zai-org/glm-5-turbo`, `zai-org/glm-5.1`, `zai-org/glm-5v-turbo`
+- MiniMax: `MiniMaxAI/MiniMax-M2`, `minimaxai/minimax-m2.1`, `minimaxai/minimax-m2.5`, `minimaxai/minimax-m2.7`
+- xAI (Grok): `xai/grok-4.3`
+- 快手 KAT: `kwaipilot/kat-coder-pro-v2`
+- 其他: `owl`
+
+</details>
+
 ## 一、大语言模型 (LLM)
 
 ### 以 DeepSeek 为例
