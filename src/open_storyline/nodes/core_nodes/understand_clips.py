@@ -140,12 +140,7 @@ class UnderstandClipsNode(BaseNode):
 
             if raw is None:
                 out_item["caption"] = "Error: VLM request failed"
-                try:
-                    raw_score = obj.get("aes_score")
-                    out_item["aes_score"] = float(str(raw_score).strip())
-                except (ValueError, TypeError, AttributeError):
-                    # If the conversion fails (such as "abc", None, "nan", etc.), assign the value -1.0
-                    out_item["aes_score"] = -1.0
+                out_item["aes_score"] = -1.0
                 node_state.node_summary.add_error(repr(last_exc))
                 clip_captions.append(out_item)
                 continue
@@ -159,6 +154,12 @@ class UnderstandClipsNode(BaseNode):
                 continue
 
             out_item["caption"] = str(obj.get("caption", "") or "").strip()
+            try:
+                raw_score = obj.get("aes_score")
+                out_item["aes_score"] = float(str(raw_score).strip())
+            except (ValueError, TypeError, AttributeError):
+                # If the conversion fails (such as "abc", None, "nan", etc.), assign the value -1.0
+                out_item["aes_score"] = -1.0
             out_item["source_ref"] = {
                 "media_id": clip.get("source_ref", {}).get("media_id", ""),
             }
