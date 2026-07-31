@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/fireredteam-firered-openstoryline-badge.png)](https://mseep.ai/app/fireredteam-firered-openstoryline)
+
 <div align="center">
   <a href="#gh-light-mode-only">
     <img
