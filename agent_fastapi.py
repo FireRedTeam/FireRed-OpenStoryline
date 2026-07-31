@@ -54,6 +54,7 @@ from open_storyline.utils.ai_transition_cancel import (
 )
 from open_storyline.config import load_settings, default_config_path
 from open_storyline.config import Settings
+from open_storyline.model_presets import list_model_presets, resolve_model_preset
 from open_storyline.storage.agent_memory import ArtifactStore
 from open_storyline.mcp.hooks.node_interceptors import ToolInterceptor
 from open_storyline.mcp.hooks.chat_middleware import set_mcp_log_sink, reset_mcp_log_sink
@@ -1274,7 +1275,7 @@ class ChatSession:
         default_llm = _peek_builtin_model_name("llm", self.cfg)
         default_vlm = _peek_builtin_model_name("vlm", self.cfg)
 
-        self.chat_models = [default_llm, CUSTOM_MODEL_KEY]
+        self.chat_models = [default_llm, *list_model_presets("llm"), CUSTOM_MODEL_KEY]
         self.chat_model_key = default_llm
 
         self.vlm_models = [default_vlm, CUSTOM_MODEL_KEY]
@@ -1934,6 +1935,14 @@ class ChatSession:
             if not isinstance(self.custom_llm_config, dict):
                 raise RuntimeError("please fill in model/base_url/api_key of custom LLM")
             llm_override = self.custom_llm_config
+        elif self.chat_model_key in list_model_presets("llm"):
+            llm_override, err = resolve_model_preset("llm", self.chat_model_key)
+            if err:
+                raise RuntimeError(err)
+            for key in ("timeout", "temperature", "max_retries", "top_p", "max_tokens"):
+                value = getattr(self.cfg.llm, key, None)
+                if value not in (None, ""):
+                    llm_override[key] = value
         else:
             llm_override, err = _resolve_builtin_model_override("llm", self.cfg.llm)
             if err:
