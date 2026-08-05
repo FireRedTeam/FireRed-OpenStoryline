@@ -189,7 +189,8 @@ conda activate storyline
 ### 3. 资源下载与依赖安装
 #### 3.1 一键安装（仅支持Linux和MacOS）
 ```
-sh build_env.sh
+chmod +x build_env.sh
+./build_env.sh
 ```
 
 #### 3.2 手动安装
