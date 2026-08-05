@@ -1,9 +1,13 @@
 
-
 import aiofiles
 from pathlib import Path
 from skillkit import SkillManager
 from skillkit.integrations.langchain import create_langchain_tools
+
+from open_storyline.compat.langgraph_runtime import ensure_langgraph_runtime_compat
+
+ensure_langgraph_runtime_compat()
+
 from langchain.agents import create_agent
 from langchain_openai import ChatOpenAI
 from langchain.messages import HumanMessage

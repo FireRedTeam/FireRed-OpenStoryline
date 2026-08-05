@@ -5,6 +5,10 @@ import logging
 
 import httpx
 
+from open_storyline.compat.langgraph_runtime import ensure_langgraph_runtime_compat
+
+ensure_langgraph_runtime_compat()
+
 from langchain.agents import create_agent
 from langchain_openai import ChatOpenAI
 
