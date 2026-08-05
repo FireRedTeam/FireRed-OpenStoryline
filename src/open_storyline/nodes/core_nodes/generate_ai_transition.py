@@ -92,7 +92,7 @@ class GenerateAITransitionNode(BaseNode):
         ".mp4", ".mov", ".mkv", ".avi"
     }
     IMAGE_EXTS = {
-        ".jpg", ".jpeg", ".png", ".webp", ".bmp"
+        ".jpg", ".jpeg", ".png", ".webp", ".bmp", ".heic", ".heif"
     }
 
     DEFAULT_TRANSITION_DURATION = 5

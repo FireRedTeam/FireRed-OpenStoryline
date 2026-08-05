@@ -23,7 +23,7 @@ DEFAULT_MAX_FRAMES = 6
 DEFAULT_FRAMES_PER_SEC = 3.0
 GLOBAL_MAX_IMAGE_BLOCKS = 48  # Maximum total images allowed (video frames + images) to prevent payload overflow
 
-IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tiff"}
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tiff", ".heic", ".heif"}
 VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v"}
 
 
