@@ -349,4 +349,4 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 ## ⭐ Star History
 
-<div align="center"> <p> <img width="800" src="https://api.star-history.com/svg?repos=FireRedTeam/FireRed-OpenStoryline&type=Date" alt="Star-history"> </p> </div>
+<div align="center"> <p> <img width="800" src="https://star-history.dera.page/svg?repos=FireRedTeam/FireRed-OpenStoryline&type=Date" alt="Star-history"> </p> </div>
