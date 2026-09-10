@@ -280,6 +280,12 @@ class TimeLine:
                 text_durations = [tts_duration for tts_duration in tts_durations]
             elif cfg.text_duration_mode == 'with_clip':
 
+                # `paragraph*` are only bound on the wo-tts path below, so compute them
+                # here too (same expressions as `edit_tts_timeline`) before they are read.
+                paragraph = [0] + list(accumulate(tts_indices_map.values()))
+                paragraph_durations = [[dura for dura in meterial_durations[paragraph[i]: paragraph[i+1]]] for i in range(len(paragraph[:-1]))]
+                paragraph_durations_sum = [sum(durations) for durations in paragraph_durations]
+
                 # calculate tts margin
                 long_short_text_duration, long_text_margin_rate, short_text_margin_rate = cfg.long_short_text_duration, cfg.long_text_margin_rate, cfg.short_text_margin_rate
                 long_tts_margin = [min(int(long_text_margin_rate * paragraph_durations[i][0]), abs(paragraph_durations_sum[i] - tts_res[i]['duration'])) for i in range(len(paragraph[:-1]))]
