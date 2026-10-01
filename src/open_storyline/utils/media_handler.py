@@ -1,9 +1,20 @@
-import os
 from pathlib import Path
 from typing import Union
 
 _MEDIA_EXTS_IMG = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}
-_MEDIA_EXTS_VID = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"}
+SUPPORTED_VIDEO_EXTENSIONS = frozenset({
+    ".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v",
+})
+
+
+def detect_media_kind(filename: str) -> str:
+    ext = Path(filename).suffix.lower()
+    if ext in _MEDIA_EXTS_IMG:
+        return "image"
+    if ext in SUPPORTED_VIDEO_EXTENSIONS:
+        return "video"
+    return "unknown"
+
 
 def scan_media_dir(media_dir: Union[Path, str]) -> dict:
     image_num, video_num = 0, 0
@@ -17,11 +28,10 @@ def scan_media_dir(media_dir: Union[Path, str]) -> dict:
         if not path.is_file():
             continue
 
-        ext = path.suffix.lower()
-
-        if ext in _MEDIA_EXTS_IMG:
+        media_kind = detect_media_kind(path.name)
+        if media_kind == "image":
             image_num += 1
-        elif ext in _MEDIA_EXTS_VID:
+        elif media_kind == "video":
             video_num += 1
 
     return {

@@ -10,6 +10,7 @@ from open_storyline.utils.register import NODE_REGISTRY
 from open_storyline.utils.prompts import get_prompt
 from open_storyline.utils.ai_transition_cancel import is_ai_transition_cancelled
 from open_storyline.utils.ai_transition_client import VisionClientFactory
+from open_storyline.utils.media_handler import SUPPORTED_VIDEO_EXTENSIONS
 from open_storyline.nodes.core_nodes.base_node import BaseNode, NodeMeta
 from open_storyline.nodes.node_state import NodeState
 from open_storyline.nodes.node_schema import GenerateAITransitionInput
@@ -88,9 +89,7 @@ class GenerateAITransitionNode(BaseNode):
         next_available_node=["generate_script"],
     )
     input_schema = GenerateAITransitionInput
-    VIDEO_EXTS = {
-        ".mp4", ".mov", ".mkv", ".avi"
-    }
+    VIDEO_EXTS = SUPPORTED_VIDEO_EXTENSIONS
     IMAGE_EXTS = {
         ".jpg", ".jpeg", ".png", ".webp", ".bmp"
     }

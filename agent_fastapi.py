@@ -47,7 +47,7 @@ if SRC_DIR not in sys.path:
 
 from open_storyline.agent import build_agent, ClientContext
 from open_storyline.utils.prompts import get_prompt
-from open_storyline.utils.media_handler import scan_media_dir
+from open_storyline.utils.media_handler import detect_media_kind, scan_media_dir
 from open_storyline.utils.ai_transition_cancel import (
     clear_ai_transition_cancelled,
     set_ai_transition_cancelled,
@@ -301,15 +301,6 @@ def sanitize_filename(name: str) -> str:
     name = os.path.basename(name or "")
     name = name.replace("\x00", "")
     return name or "unnamed"
-
-
-def detect_media_kind(filename: str) -> str:
-    ext = os.path.splitext(filename)[1].lower()
-    if ext in {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}:
-        return "image"
-    if ext in {".mp4", ".mov", ".avi", ".mkv", ".webm"}:
-        return "video"
-    return "unknown"
 
 
 _SECRET_VALUE_PATTERNS = [

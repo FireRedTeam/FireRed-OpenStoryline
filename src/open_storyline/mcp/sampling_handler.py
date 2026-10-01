@@ -11,6 +11,7 @@ from moviepy.video.io.VideoFileClip import VideoFileClip
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
 from mcp.types import CreateMessageRequestParams, CreateMessageResult, TextContent
+from open_storyline.utils.media_handler import SUPPORTED_VIDEO_EXTENSIONS
 
 
 # -----------------------------
@@ -24,7 +25,7 @@ DEFAULT_FRAMES_PER_SEC = 3.0
 GLOBAL_MAX_IMAGE_BLOCKS = 48  # Maximum total images allowed (video frames + images) to prevent payload overflow
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tiff"}
-VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v"}
+VIDEO_EXTS = SUPPORTED_VIDEO_EXTENSIONS
 
 
 def _is_data_url(u: str) -> bool:
