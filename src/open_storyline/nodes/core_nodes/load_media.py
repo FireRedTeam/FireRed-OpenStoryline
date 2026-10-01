@@ -9,13 +9,12 @@ from moviepy.video.io.ffmpeg_reader import ffmpeg_parse_infos
 from open_storyline.nodes.core_nodes.base_node import NodeMeta, BaseNode
 from open_storyline.nodes.node_schema import LoadMediaInput, LoadMediaOutput
 from open_storyline.nodes.node_state import NodeState
+from open_storyline.utils.media_handler import SUPPORTED_VIDEO_EXTENSIONS
 from open_storyline.utils.util import get_video_rotation
 from open_storyline.utils.register import NODE_REGISTRY
 
 
-VIDEO_EXTS = {
-    ".mp4", ".mov", ".mkv", ".avi"
-}
+VIDEO_EXTS = SUPPORTED_VIDEO_EXTENSIONS
 IMAGE_EXTS = {
     ".jpg", ".jpeg", ".png", ".webp", ".bmp"
 }
