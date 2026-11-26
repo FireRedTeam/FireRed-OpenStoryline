@@ -28,6 +28,17 @@ Note: For users outside China, we recommend using large language models such as 
       - If you prefer the CLI entry point, you need to open `config.toml`, locate `[llm]`, and configure `model`, `base_url`, and `api_key`.
 
 
+### Using MartLLM (one key for many models)
+
+[MartLLM](https://martllm.com) is an OpenAI-compatible API: one key reaches DeepSeek, Gemini, Claude, GPT, Qwen and other models, so the same key can fill both the `[llm]` and `[vlm]` settings. It is prepaid credit with no subscription.
+
+1. **Apply for API Key**: sign up at https://martllm.com/signup and create a key in the dashboard. Docs: https://martllm.com/docs/quickstart
+2. **Configuration Parameters**
+   - **Model Name**: for example `deepseek/deepseek-v4-flash` (LLM) or `google/gemini-3-flash` (VLM). The full list of model IDs is at https://api.martllm.com/v1/models
+   - **Base URL**: `https://api.martllm.com/v1`
+   - **API Key**: Fill in the Key obtained in the previous step
+3. **API Configuration**: the same as above. Select **Custom Model** in the Web dropdown, or set `model`, `base_url` and `api_key` under `[llm]` / `[vlm]` in `config.toml`.
+
 ## 2. Multimodal Large Language Model (VLM)
 
 ### 2.1 Using GLM-4.6V
