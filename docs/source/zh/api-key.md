@@ -27,6 +27,17 @@
    - **CLI**：
       - 如果你偏好 CLI 入口，需要在`config.toml`中找到`[llm]`并配置model、base_url、api_key。
 
+### 使用 MartLLM（一个 Key 调用多家模型）
+
+[MartLLM](https://martllm.com) 提供兼容 OpenAI 的 API：一个 Key 即可调用 DeepSeek、Gemini、Claude、GPT、Qwen 等模型，同一个 Key 可同时用于 `[llm]` 和 `[vlm]` 配置。预付费，无订阅。
+
+1. **申请 API Key**：在 https://martllm.com/signup 注册后，在控制台创建 Key。文档：https://martllm.com/docs/quickstart
+2. **配置参数**
+   - **模型名称**：例如 `deepseek/deepseek-v4-flash`（LLM）或 `google/gemini-3-flash`（VLM）。完整模型 ID 列表见 https://api.martllm.com/v1/models
+   - **Base URL**：`https://api.martllm.com/v1`
+   - **API Key**：填写上一步获取的 Key
+3. **API填写**：与上文相同。在 Web 下拉框中选择使用自定义模型，或在`config.toml`的`[llm]` / `[vlm]`中配置model、base_url、api_key。
+
 ## 二、多模态大模型 (VLM)
 
 ### 2.1 使用GLM-4.6V
